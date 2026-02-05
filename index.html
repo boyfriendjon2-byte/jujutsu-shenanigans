@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Jujutsu Shenanigans – V16 (Camera Perfect Fix)</title>
+  <title>Jujutsu Shenanigans – V17 (Camera Fix)</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Anton&display=swap');
 
@@ -14,18 +14,14 @@
       display: flex; flex-direction: column; justify-content: space-between;
     }
 
-    /* MIRA CENTRAL (Crosshair) */
     #crosshair {
       position: absolute; top: 50%; left: 50%;
       width: 6px; height: 6px;
-      background: white;
-      border: 2px solid black;
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
+      background: white; border: 2px solid black;
+      border-radius: 50%; transform: translate(-50%, -50%);
       z-index: 50; display: none;
     }
 
-    /* HUD */
     #hud-bottom {
       display: flex; justify-content: space-between; align-items: flex-end;
       padding: 20px; width: 100%; box-sizing: border-box;
@@ -86,7 +82,7 @@
   <div id="dead-screen">WASTED</div>
   <div id="damage-container"></div>
   <div id="connection-status">Conectando...</div>
-  <div id="lock-msg">HAZ CLIC Y PRESIONA [CTRL] PARA JUGAR</div>
+  <div id="lock-msg">HAZ CLIC Y PRESIONA [CTRL] PARA ACTIVAR LA CÁMARA</div>
   
   <div id="crosshair"></div>
 
@@ -126,14 +122,14 @@
       DOMAIN_RADIUS: 22
     };
 
-    // Globales
     let scene, camera, renderer;
     const avatars = {}; 
     let isOffline = false; 
 
-    // CÁMARA Y CONTROL
-    let cameraAngle = Math.PI; // Empezar mirando la espalda
-    let cameraVertical = 0.5;  // Altura media
+    // CÁMARA
+    let cameraAngle = Math.PI;
+    let cameraHeight = 5; // Altura relativa
+    let cameraDist = 12; // Distancia
     let isMouseLocked = false;
     const controls = { fwd: false, back: false, left: false, right: false };
 
@@ -146,7 +142,6 @@
     let isFrozen = false;
     let isRagdolled = false;
 
-    // Dominio
     let activeDomain = null;
     let domainGroup = null;
 
@@ -194,8 +189,8 @@
     // ==========================================
     function spawnAvatar(state) {
       const id = state.id;
-      let hex = 0xffffff;
-      try { const p = state.getProfile(); if(p && p.color) hex = p.color.hex; } catch(e) {}
+      // Colores brillantes para que se vea bien
+      let hex = (id === "dummy_bot") ? 0xff0000 : 0x0088ff; 
       
       const mesh = createMesh(hex);
       scene.add(mesh);
@@ -219,21 +214,21 @@
 
     function spawnLocalPlayer() {
         const myId = "local_player";
-        const mockState = createMockState(myId, 0x0000ff);
+        const mockState = createMockState(myId);
         spawnAvatar(mockState);
     }
 
     function spawnDummyBot() {
         const botId = "dummy_bot";
-        const mockState = createMockState(botId, 0xff0000);
+        const mockState = createMockState(botId);
         mockState._data.pos = {x: 5, y:0, z:0};
         spawnAvatar(mockState);
     }
 
-    function createMockState(id, color) {
+    function createMockState(id) {
         return {
             id: id,
-            getProfile: () => ({ color: { hex: color } }),
+            getProfile: () => ({ color: { hex: 0xffffff } }),
             _data: { pos: {x:0,y:0,z:0}, hp: 100, ragdoll: false },
             getState: function(k) { return this._data[k]; },
             setState: function(k, v) { this._data[k] = v; },
@@ -242,7 +237,7 @@
     }
 
     // ==========================================
-    // 3. CÁMARA FIX & CONTROLES
+    // 3. CONTROLES Y CÁMARA (FIXED)
     // ==========================================
     
     document.addEventListener('keydown', (e) => {
@@ -258,28 +253,21 @@
 
     document.addEventListener('pointerlockchange', () => {
         isMouseLocked = (document.pointerLockElement === document.body);
-        const cross = document.getElementById('crosshair');
-        const msg = document.getElementById('lock-msg');
-        
-        if (isMouseLocked) {
-            cross.style.display = 'block';
-            msg.style.display = 'none';
-        } else {
-            cross.style.display = 'none';
-            msg.style.display = 'block';
-        }
+        document.getElementById('crosshair').style.display = isMouseLocked ? 'block' : 'none';
+        document.getElementById('lock-msg').style.display = isMouseLocked ? 'none' : 'block';
     });
 
     document.addEventListener('mousemove', (e) => {
         if (isMouseLocked) {
-            // FIX: Invertir X para rotación natural (mouse derecha = camara derecha)
-            cameraAngle -= e.movementX * 0.002; 
+            // Rotación Horizontal
+            cameraAngle -= e.movementX * 0.003; 
             
-            // FIX: Invertir Y para comportamiento normal (mouse abajo = mirar abajo/camara sube)
-            cameraVertical += e.movementY * 0.002; 
+            // Rotación Vertical (Corregida: Mouse Abajo = +Height = Cámara Sube = Mirar Abajo)
+            // Queremos: Mouse Abajo -> Mirar Abajo -> Cámara Sube
+            cameraHeight += e.movementY * 0.05; 
             
-            // Limitar para no dar la vuelta completa por arriba o abajo
-            cameraVertical = Math.max(-0.5, Math.min(2.0, cameraVertical));
+            // Límites para no dar la vuelta (Suelo a Cielo)
+            cameraHeight = Math.max(1, Math.min(10, cameraHeight));
         }
     });
 
@@ -439,9 +427,7 @@
         el.innerText = `-${dmg}`;
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
-        if(isCrit) {
-            el.style.color = "#ff00ff"; el.innerText += "!";
-        }
+        if(isCrit) { el.style.color = "#ff00ff"; el.innerText += "!"; }
         document.getElementById('damage-container').appendChild(el);
         setTimeout(() => el.remove(), 800);
     }
@@ -582,7 +568,7 @@
 
     function createMesh(color) {
       const g = new THREE.Group();
-      const mat = new THREE.MeshStandardMaterial({color:0x1a1a1a});
+      const mat = new THREE.MeshStandardMaterial({color:color}); // Usar color dinámico
       const skin = new THREE.MeshStandardMaterial({color:0xffccaa});
 
       const torso = new THREE.Mesh(new THREE.BoxGeometry(1,1.2,0.5), mat);
@@ -640,7 +626,7 @@
              if (controls.left) dir.sub(right);
              if (controls.right) dir.add(right);
              
-             if (dir.lengthSq() === 0) dir.copy(fwd); // Dash forward default
+             if (dir.lengthSq() === 0) dir.copy(fwd); 
         } else {
              if(controls.fwd) dir.z-=1; if(controls.back) dir.z+=1;
              if(controls.left) dir.x-=1; if(controls.right) dir.x+=1;
@@ -689,7 +675,6 @@
             const dir = new THREE.Vector3();
 
             if (isMouseLocked) {
-                // Mover relativo a la cámara
                 const fwd = new THREE.Vector3(Math.sin(cameraAngle), 0, Math.cos(cameraAngle));
                 const right = new THREE.Vector3(Math.sin(cameraAngle - Math.PI/2), 0, Math.cos(cameraAngle - Math.PI/2));
                 
@@ -710,7 +695,6 @@
             }
         }
 
-        // Render Avatares
         const time = Date.now() * 0.001;
         for(const id in avatars) {
             const {mesh, state} = avatars[id];
@@ -748,20 +732,18 @@
             }
         }
 
-        // FIX CÁMARA (Estaba al revés)
+        // --- CÁMARA FIX ---
         if(me) {
             const p = getPos(me);
-            // Distancia 14, DETRÁS del jugador
+            // La cámara se posiciona DETRÁS (-sin, -cos) del personaje.
+            // Miramos hacia la cintura (Y + 1.0) para centrar al personaje.
             const dist = 14;
-            // Para estar detrás, restamos seno/coseno del angulo
             const camX = p.x - Math.sin(cameraAngle) * dist;
             const camZ = p.z - Math.cos(cameraAngle) * dist;
-            
-            // Altura de cámara ajustada para ver desde arriba/atrás
-            const camY = p.y + 4 + (cameraVertical * 10);
+            const camY = p.y + 4 + (cameraHeight * 5); 
 
             camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.2);
-            camera.lookAt(p.x, p.y + 3, p.z);
+            camera.lookAt(p.x, p.y + 1.5, p.z);
         }
 
         if(domainGroup) domainGroup.rotation.y += 0.002;
