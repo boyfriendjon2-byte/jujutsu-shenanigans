@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Jujutsu Shenanigans – Alpha V4 (Combat & Health)</title>
+  <title>Jujutsu Shenanigans – Alpha V4.1 (Fix)</title>
   <style>
     body {
       margin: 0;
@@ -71,9 +71,9 @@
     // Constantes de Juego
     const MAX_HP = 100;
     const DASH_COOLDOWN = 1000;
-    const PUNCH_COOLDOWN = 400; // Un poco más rápido para combos
-    const COMBO_RESET_TIME = 1500; // Si no pegas en 1.5s, se reinicia el combo
-    const RAGDOLL_DURATION = 3000; // Tiempo en el suelo si no haces dash
+    const PUNCH_COOLDOWN = 400; 
+    const COMBO_RESET_TIME = 1500;
+    const RAGDOLL_DURATION = 3000; 
 
     // Configuración del Dominio
     const DOMAIN_DURATION = 29000;
@@ -85,11 +85,13 @@
     let lastPunch = 0;
     
     // Estado de Combate Local
-    let comboCount = 0; // 0 a 3 (Golpes 1, 2, 3, 4)
+    let comboCount = 0; 
     let lastComboHitTime = 0;
-    let isRagdolled = false; // Si estoy tirado en el suelo
+    let isRagdolled = false; 
     let isPunching = false;
-    let isFrozenByDomain = false;
+    
+    // CORRECCIÓN: Unificamos la variable a 'isFrozen' para evitar el error
+    let isFrozen = false; 
     let isTrappedInDomain = false;
     let activeDomainCenter = null;
 
@@ -102,7 +104,8 @@
     // 2. INICIO
     // ==========================================
     async function init() {
-      await insertCoin();
+      // Omitir lobby para carga rápida y evitar algunos errores de CORS en local
+      await insertCoin({ skipLobby: true });
       setupScene();
 
       onPlayerJoin((state) => {
@@ -116,7 +119,7 @@
         avatars[id] = { 
           mesh: group, 
           state: state, 
-          lastAttackId: null // Para no recibir daño doble del mismo golpe
+          lastAttackId: null 
         };
 
         state.onQuit(() => {
@@ -178,7 +181,7 @@
     function createAvatarWithHealthBar(color) {
       const group = new THREE.Group();
 
-      // --- Personaje (Estilo Jujutsu) ---
+      // Materiales
       const matBlack = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
       const matSkin = new THREE.MeshStandardMaterial({ color: 0xffccaa });
       
@@ -208,19 +211,17 @@
       lLeg.position.set(-0.25, 0.55, 0); lLeg.castShadow = true;
       group.add(lLeg);
 
-      // --- BARRA DE VIDA ---
-      // Fondo Rojo (Daño)
+      // Barra de Vida
       const hpBgGeo = new THREE.PlaneGeometry(1.2, 0.15);
       const hpBgMat = new THREE.MeshBasicMaterial({ color: 0x550000 });
       const hpBg = new THREE.Mesh(hpBgGeo, hpBgMat);
       hpBg.position.set(0, 3.2, 0);
       group.add(hpBg);
 
-      // Barra Verde (Vida Actual)
       const hpBarGeo = new THREE.PlaneGeometry(1.2, 0.15);
       const hpBarMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
       const hpBar = new THREE.Mesh(hpBarGeo, hpBarMat);
-      hpBar.position.set(0, 3.2, 0.01); // Un poco enfrente del fondo
+      hpBar.position.set(0, 3.2, 0.01); 
       hpBar.name = "HealthBar";
       group.add(hpBar);
 
@@ -247,26 +248,23 @@
       if (k === 'KeyD') controls.right = false;
     }
 
-    // --- DASH Y RECUPERACIÓN (RAGDOLL) ---
+    // --- DASH Y RECUPERACIÓN ---
     function tryDashOrRecover() {
       const player = myPlayer();
       if (!player) return;
 
-      // 1. Si estoy Ragdoll (Tirado) -> Levantarme rápido
       if (isRagdolled) {
         recoverFromRagdoll();
         return;
       }
 
-      // 2. Dash Normal
       const now = Date.now();
-      if (now - lastDash < DASH_COOLDOWN && !isRagdolled) return;
-      if (isFrozen) return; // Congelado por dominio
+      // FIX: Ahora 'isFrozen' existe y funciona
+      if (now - lastDash < DASH_COOLDOWN || isFrozen) return;
 
       lastDash = now;
       let pos = player.getState('pos') || {x:0, y:0, z:0};
       
-      // Dirección del Dash
       const dir = new THREE.Vector3();
       if (controls.fwd) dir.z -= 1;
       if (controls.back) dir.z += 1;
@@ -275,11 +273,9 @@
       if (dir.length() === 0) dir.z -= 1;
       dir.normalize();
 
-      // Aplicar movimiento
-      let nx = pos.x + dir.x * 6; // Dash largo
+      let nx = pos.x + dir.x * 6; 
       let nz = pos.z + dir.z * 6;
       
-      // Respetar barrera
       const final = checkBarrier(nx, nz);
       player.setState('pos', { x: final.x, y: 0, z: final.z }, false);
     }
@@ -287,9 +283,9 @@
     // --- SISTEMA DE COMBATE (M1) ---
     function tryPunch() {
       const now = Date.now();
-      // Resetear combo si esperaste mucho
       if (now - lastComboHitTime > COMBO_RESET_TIME) comboCount = 0;
       
+      // FIX: Ahora 'isFrozen' existe y funciona
       if (now - lastPunch < PUNCH_COOLDOWN || isRagdolled || isFrozen || isPunching) return;
       
       lastPunch = now;
@@ -297,23 +293,16 @@
       isPunching = true;
       comboCount++; 
       
-      if (comboCount > 4) comboCount = 1; // Ciclo 1-2-3-4
+      if (comboCount > 4) comboCount = 1; 
 
       const player = myPlayer();
       const myId = player.id;
 
-      // 1. Animación Local
       animatePunchArm(myId);
 
-      // 2. Determinar Daño y Efecto
       let damage = 0;
       let causesRagdoll = false;
 
-      // Lógica pedida:
-      // 1er M1: 3 daño
-      // 2do M1: 3 daño
-      // 3er M1: 4 daño
-      // 4to M1: 4 daño + Ragdoll
       if (comboCount === 1) damage = 3;
       else if (comboCount === 2) damage = 3;
       else if (comboCount === 3) damage = 4;
@@ -322,12 +311,10 @@
         causesRagdoll = true;
       }
 
-      // 3. Detectar Impacto (Hitbox simple de distancia)
       const myPos = player.getState('pos') || {x:0,y:0,z:0};
       
-      // Buscar jugadores cercanos
       for (const id in avatars) {
-        if (id === myId) continue; // No pegarse a uno mismo
+        if (id === myId) continue; 
         const enemy = avatars[id];
         const ePos = enemy.state.getState('pos') || {x:0,y:0,z:0};
         
@@ -335,24 +322,17 @@
         const dz = myPos.z - ePos.z;
         const dist = Math.sqrt(dx*dx + dz*dz);
 
-        if (dist < 2.5) { // Rango de golpe
-          // ¡GOLPE EXITOSO!
-          // Enviamos un evento de ataque a la red.
-          // El 'attackId' aleatorio asegura que cada golpe sea único.
+        if (dist < 2.5) { 
           player.setState('lastAttack', {
             targetId: id,
             damage: damage,
             ragdoll: causesRagdoll,
             attackId: Math.random() 
           }, true);
-          
-          console.log(`Hit M${comboCount} -> Dmg: ${damage} Ragdoll: ${causesRagdoll}`);
         }
       }
 
-      // Resetear flag de animación
       setTimeout(() => { isPunching = false; }, 200);
-      // Si fue el 4to golpe, resetear combo inmediatamente para el siguiente ciclo
       if (comboCount === 4) comboCount = 0; 
     }
 
@@ -371,24 +351,17 @@
       if (!me) return;
       const myId = me.id;
 
-      // Revisar el estado 'lastAttack' de TODOS los demás jugadores
       for (const id in avatars) {
         if (id === myId) continue;
         const attacker = avatars[id];
         const attackData = attacker.state.getState('lastAttack');
 
         if (attackData && attackData.targetId === myId) {
-          // Es un ataque para mí. ¿Es nuevo?
           if (attacker.lastAttackId !== attackData.attackId) {
-            attacker.lastAttackId = attackData.attackId; // Marcar como procesado
+            attacker.lastAttackId = attackData.attackId; 
             
-            // APLICAR DAÑO
             applyDamage(attackData.damage);
-
-            // APLICAR RAGDOLL
-            if (attackData.ragdoll) {
-              applyRagdoll();
-            }
+            if (attackData.ragdoll) applyRagdoll();
           }
         }
       }
@@ -397,31 +370,26 @@
     function applyDamage(amount) {
       const me = myPlayer();
       let currentHp = me.getState('hp');
-      if (currentHp === undefined) currentHp = MAX_HP; // Inicializar si no existe
+      if (currentHp === undefined) currentHp = MAX_HP; 
 
       let newHp = currentHp - amount;
       if (newHp < 0) newHp = 0;
 
       me.setState('hp', newHp, true);
 
-      // Muerte y Respawn
-      if (newHp <= 0) {
-        respawn();
-      }
+      if (newHp <= 0) respawn();
     }
 
     function respawn() {
       const me = myPlayer();
-      // Mostrar pantalla de muerte brevemente
       const screen = document.getElementById('dead-screen');
       screen.style.display = 'flex';
       
-      // Resetear
       setTimeout(() => {
         screen.style.display = 'none';
         me.setState('hp', MAX_HP, true);
-        me.setState('pos', { x: 0, y: 0, z: 0 }, true); // Volver al centro
-        me.setState('ragdollState', false, true); // Quitar ragdoll si morí en el suelo
+        me.setState('pos', { x: 0, y: 0, z: 0 }, true); 
+        me.setState('ragdollState', false, true); 
         isRagdolled = false;
       }, 2000);
     }
@@ -429,11 +397,8 @@
     function applyRagdoll() {
       if (isRagdolled) return;
       isRagdolled = true;
-      
-      // Sincronizar estado visual (acostarse)
       myPlayer().setState('ragdollState', true, true);
 
-      // Auto-levantarse después de X segundos si no hace dash
       setTimeout(() => {
         if (isRagdolled) recoverFromRagdoll();
       }, RAGDOLL_DURATION);
@@ -446,39 +411,34 @@
     }
 
     // ==========================================
-    // 6. ACTUALIZACIÓN VISUAL (HP, Rotación)
+    // 6. ACTUALIZACIÓN VISUAL
     // ==========================================
     function updateVisuals() {
       for (const id in avatars) {
         const { mesh, state } = avatars[id];
 
-        // 1. Barra de Vida
         let hp = state.getState('hp');
         if (hp === undefined) hp = MAX_HP;
         const bar = mesh.getObjectByName("HealthBar");
         if (bar) {
           const percent = hp / MAX_HP;
-          bar.scale.x = percent; // Escalar barra verde
-          // Mover para que se escale desde la izquierda
-          // (ThreeJS escala desde el centro, ajustamos posición)
-          // Simplificación: Escalar centro funciona visualmente bien si es simple
+          bar.scale.x = percent; 
           bar.visible = hp > 0;
         }
 
-        // 2. Ragdoll (Rotación del cuerpo entero)
         const isRagdollRemote = state.getState('ragdollState');
         if (isRagdollRemote) {
-          mesh.rotation.x = -Math.PI / 2; // Acostado
-          mesh.position.y = 0.5; // Pegado al suelo
+          mesh.rotation.x = -Math.PI / 2; 
+          mesh.position.y = 0.5; 
         } else {
-          mesh.rotation.x = 0; // De pie
+          mesh.rotation.x = 0; 
           mesh.position.y = 0;
         }
       }
     }
 
     // ==========================================
-    // 7. LÓGICA DEL DOMINIO (BARRERA)
+    // 7. LÓGICA DEL DOMINIO
     // ==========================================
     function tryDomain() {
       const current = getState('domain');
@@ -505,23 +465,18 @@
       const sig = d && d.active ? `${d.active}-${d.owner}` : 'null';
       
       if (sig !== lastDomainSig) {
-        // Cambio de estado del dominio
         lastDomainSig = sig;
         const audio = document.getElementById('domainAudio');
         
-        // Limpiar
         if (domainSphere) { scene.remove(domainSphere); domainSphere = null; }
         if (domainFloor) { scene.remove(domainFloor); domainFloor = null; }
 
         if (d && d.active) {
-          // Activar
           activeDomainCenter = d.pos;
           const me = myPlayer();
           
-          // Audio
           if (audio.paused) audio.play().catch(()=>{});
 
-          // Visuales
           const sGeo = new THREE.SphereGeometry(DOMAIN_RADIUS, 32, 32);
           const sMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, side: THREE.BackSide });
           domainSphere = new THREE.Mesh(sGeo, sMat);
@@ -535,22 +490,21 @@
           domainFloor.position.set(d.pos.x, 0.05, d.pos.z);
           scene.add(domainFloor);
 
-          // Chequear si quedé atrapado
           const myPos = me.getState('pos') || {x:0,y:0,z:0};
           const dist = Math.sqrt(Math.pow(myPos.x - d.pos.x, 2) + Math.pow(myPos.z - d.pos.z, 2));
           
           if (dist <= DOMAIN_RADIUS) {
             isTrappedInDomain = true;
-            isFrozenByDomain = (me.id !== d.owner); // Congelar si no soy dueño
+            // FIX: Actualizamos la variable correcta 'isFrozen'
+            isFrozen = (me.id !== d.owner); 
           } else {
             isTrappedInDomain = false;
-            isFrozenByDomain = false;
+            isFrozen = false;
           }
 
         } else {
-          // Desactivar
           activeDomainCenter = null;
-          isFrozenByDomain = false;
+          isFrozen = false;
           isTrappedInDomain = false;
           audio.pause(); audio.currentTime = 0;
         }
@@ -564,7 +518,6 @@
       const dz = z - activeDomainCenter.z;
       const dist = Math.sqrt(dx*dx + dz*dz);
       
-      // Si estoy dentro, no puedo salir
       if (isTrappedInDomain) {
         if (dist >= DOMAIN_RADIUS - 0.5) {
           const angle = Math.atan2(dz, dx);
@@ -574,7 +527,6 @@
           };
         }
       } 
-      // Si estoy fuera, no puedo entrar
       else {
         if (dist <= DOMAIN_RADIUS + 0.5) {
           const angle = Math.atan2(dz, dx);
@@ -596,13 +548,12 @@
       const me = myPlayer();
       if (!me) return;
 
-      // 1. Lógica de Red (Recibir daño, actualizar dominio)
       checkIncomingAttacks();
       updateDomain();
       updateVisuals();
 
-      // 2. Movimiento Local
-      if (!isRagdolled && !isFrozenByDomain) {
+      // FIX: Usar variable correcta 'isFrozen'
+      if (!isRagdolled && !isFrozen) {
         let pos = me.getState('pos') || {x:0, y:0, z:0};
         const speed = 0.15;
         let dx = 0; let dz = 0;
@@ -616,10 +567,8 @@
           let nx = pos.x + dx;
           let nz = pos.z + dz;
           
-          // Barrera del dominio
           const final = checkBarrier(nx, nz);
           
-          // Límites del mapa
           final.x = Math.max(-245, Math.min(245, final.x));
           final.z = Math.max(-245, Math.min(245, final.z));
           
@@ -627,15 +576,12 @@
         }
       }
 
-      // 3. Renderizar Avatares
       for (const id in avatars) {
         const { mesh, state } = avatars[id];
         const p = state.getState('pos') || {x:0,y:0,z:0};
         
-        // Lerp posición
         mesh.position.lerp(new THREE.Vector3(p.x, mesh.position.y, p.z), 0.3);
         
-        // Mirar hacia donde camina (si no está ragdoll)
         if (!state.getState('ragdollState')) {
           if (!mesh.userData.lastPos) mesh.userData.lastPos = p;
           const dx = p.x - mesh.userData.lastPos.x;
@@ -647,7 +593,6 @@
         }
       }
 
-      // Cámara
       const myPos = me.getState('pos') || {x:0,y:0,z:0};
       const camTarget = new THREE.Vector3(myPos.x, 10, myPos.z + 14);
       camera.position.lerp(camTarget, 0.1);
