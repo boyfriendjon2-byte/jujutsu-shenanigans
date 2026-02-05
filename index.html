@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Jujutsu Shenanigans – V14 (Camera & Barrier Fix)</title>
+  <title>Jujutsu Shenanigans – V15 (Camera Fixed)</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Anton&display=swap');
 
@@ -14,13 +14,16 @@
       display: flex; flex-direction: column; justify-content: space-between;
     }
 
-    /* Crosshair (Mira) para el Shift Lock */
+    /* MIRA CENTRAL (Crosshair) */
     #crosshair {
       position: absolute; top: 50%; left: 50%;
-      width: 10px; height: 10px;
-      background: white; border: 1px solid black;
-      border-radius: 50%; transform: translate(-50%, -50%);
-      opacity: 0.5; z-index: 50; display: none;
+      width: 8px; height: 8px;
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid black;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 50; display: none; /* Se activa con CTRL */
+      pointer-events: none;
     }
 
     /* HUD */
@@ -70,6 +73,12 @@
         color: white; font-family: monospace; font-size: 12px;
         background: rgba(0,0,0,0.5); padding: 5px;
     }
+    
+    #lock-msg {
+        position: absolute; top: 40%; width: 100%; text-align: center;
+        color: yellow; font-weight: bold; font-size: 20px;
+        text-shadow: 0 0 5px black; pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -77,15 +86,12 @@
   <div id="dead-screen">WASTED</div>
   <div id="damage-container"></div>
   <div id="connection-status">Conectando...</div>
+  <div id="lock-msg">PRESIONA [CTRL] PARA ACTIVAR CÁMARA</div>
   
   <div id="crosshair"></div>
 
   <div id="ui-layer">
-    <div style="text-align:center; color:rgba(255,255,255,0.7); margin-top:10px;">
-      CTRL: Bloquear Cámara | CLICK: Golpe | ESPACIO: Dash | E: Dominio
-    </div>
-
-    <div id="hud-bottom">
+    <div style="height: 50px;"></div> <div id="hud-bottom">
       <div class="health-container">
         <div class="health-label">HP <span id="hp-text">100/100</span></div>
         <div class="health-bar-bg"><div id="my-health-bar" class="health-bar-fill"></div></div>
@@ -123,9 +129,9 @@
     const avatars = {}; 
     let isOffline = false; 
 
-    // Cámara y Control
-    let cameraAngle = 0; // Ángulo de rotación horizontal
-    let cameraVertical = 0.5; // Ángulo vertical
+    // CÁMARA Y CONTROL
+    let cameraAngle = Math.PI; // Empezar mirando la espalda
+    let cameraVertical = 0.3; 
     let isMouseLocked = false;
     const controls = { fwd: false, back: false, left: false, right: false };
 
@@ -187,15 +193,11 @@
     function spawnAvatar(state) {
       const id = state.id;
       let hex = 0xffffff;
-      try { 
-          const p = state.getProfile();
-          if(p && p.color) hex = p.color.hex; 
-      } catch(e) {}
+      try { const p = state.getProfile(); if(p && p.color) hex = p.color.hex; } catch(e) {}
       
       const mesh = createMesh(hex);
       scene.add(mesh);
 
-      // Reset HP
       if (!isOffline && myPlayer().id === id) {
           state.setState('hp', CONFIG.MAX_HP, true);
       }
@@ -238,43 +240,54 @@
     }
 
     // ==========================================
-    // 3. CONTROLES Y CÁMARA (NUEVO)
+    // 3. CONTROLES Y CÁMARA (FIXED)
     // ==========================================
     
-    // MOUSE LOCK
     document.addEventListener('keydown', (e) => {
+        // Bloquear/Desbloquear con CTRL
         if (e.key === 'Control') {
-            if (!isMouseLocked) {
-                document.body.requestPointerLock();
-            } else {
-                document.exitPointerLock();
-            }
+            if (!isMouseLocked) document.body.requestPointerLock();
+            else document.exitPointerLock();
         }
+        // Inputs movimiento
+        handleKey(e.code, true);
     });
+
+    document.addEventListener('keyup', (e) => handleKey(e.code, false));
+    document.addEventListener('mousedown', (e) => { if(e.button===0) doPunch(); });
 
     document.addEventListener('pointerlockchange', () => {
         isMouseLocked = (document.pointerLockElement === document.body);
         const cross = document.getElementById('crosshair');
-        cross.style.display = isMouseLocked ? 'block' : 'none';
+        const msg = document.getElementById('lock-msg');
+        
+        if (isMouseLocked) {
+            cross.style.display = 'block';
+            msg.style.display = 'none';
+        } else {
+            cross.style.display = 'none';
+            msg.style.display = 'block';
+        }
     });
 
     document.addEventListener('mousemove', (e) => {
         if (isMouseLocked) {
-            // Rotación Horizontal (Infinita)
-            cameraAngle -= e.movementX * 0.003;
+            // FIX: Invertir el signo para que se sienta natural
+            // Mover mouse izquierda -> Gira cámara izquierda
+            cameraAngle -= e.movementX * 0.003; 
             
-            // Rotación Vertical (Limitada)
             cameraVertical -= e.movementY * 0.003;
-            cameraVertical = Math.max(0.1, Math.min(1.5, cameraVertical));
+            cameraVertical = Math.max(0.1, Math.min(1.2, cameraVertical));
         }
     });
 
-    function getCameraDirection() {
-        // Vector dirección basado en el ángulo de la cámara
-        const dir = new THREE.Vector3();
-        dir.x = Math.sin(cameraAngle);
-        dir.z = Math.cos(cameraAngle);
-        return dir;
+    function handleKey(k, d) {
+        if(k==='KeyW') controls.fwd = d;
+        if(k==='KeyS') controls.back = d;
+        if(k==='KeyA') controls.left = d;
+        if(k==='KeyD') controls.right = d;
+        if(d && k==='Space') doDash();
+        if(d && k==='KeyE') doDomain();
     }
 
     // ==========================================
@@ -310,9 +323,6 @@
             const dist = Math.hypot(myPos.x - tPos.x, myPos.z - tPos.z);
 
             if(dist < CONFIG.HIT_DIST) {
-                // Verificar ángulo (Solo pegas si miras al enemigo)
-                // Opcional, por ahora radio simple para facilitar el juego
-
                 triggerHitEffect(id);
                 showDamageNumber(tPos, damage, doRagdoll);
 
@@ -378,7 +388,7 @@
     }
 
     // ==========================================
-    // 5. ANIMACIONES
+    // 5. ANIMACIONES Y EFECTOS
     // ==========================================
     function animateAttack(id) {
         if(!avatars[id]) return;
@@ -396,6 +406,25 @@
         }
     }
 
+    function animateWalk(id, isMoving, time) {
+        if(!avatars[id]) return;
+        const mesh = avatars[id].mesh;
+        
+        if(isMoving) {
+            mesh.position.y = Math.sin(time * 15) * 0.1; 
+            const rArm = mesh.getObjectByName("RightArm");
+            const lArm = mesh.getObjectByName("LeftArm");
+            if(rArm) rArm.rotation.x = Math.sin(time * 15) * 0.5;
+            if(lArm) lArm.rotation.x = Math.sin(time * 15 + Math.PI) * 0.5;
+        } else {
+            mesh.position.y = 0;
+            const rArm = mesh.getObjectByName("RightArm");
+            const lArm = mesh.getObjectByName("LeftArm");
+            if(rArm) rArm.rotation.x = 0;
+            if(lArm) lArm.rotation.x = 0;
+        }
+    }
+
     function showDamageNumber(pos, dmg, isCrit) {
         const vector = new THREE.Vector3(pos.x, 3, pos.z);
         vector.project(camera);
@@ -408,6 +437,7 @@
         el.innerText = `-${dmg}`;
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
+        
         if(isCrit) {
             el.style.color = "#ff00ff"; el.innerText += "!";
         }
@@ -446,7 +476,6 @@
         const me = getMe();
         if(!me) return;
 
-        // Check cooldown
         const ui = document.getElementById('cd-domain');
         if(ui.style.height && ui.style.height !== '0%') return;
         triggerCooldownUI('cd-domain', CONFIG.DOMAIN_TIME);
@@ -548,9 +577,6 @@
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
-      window.addEventListener('keydown', e => handleKey(e.code, true));
-      window.addEventListener('keyup', e => handleKey(e.code, false));
-      window.addEventListener('mousedown', e => { if(e.button===0) doPunch(); });
     }
 
     function createMesh(color) {
@@ -577,7 +603,6 @@
       const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4,1.1,0.4), mat);
       lLeg.position.set(-0.25,0.55,0); g.add(lLeg);
 
-      // Barra vida (Solo para enemigos)
       const bg = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.2), new THREE.MeshBasicMaterial({color:0x550000}));
       bg.position.set(0,3.5,0); bg.name="BarBG"; g.add(bg);
       const fg = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.2), new THREE.MeshBasicMaterial({color:0x00ff00}));
@@ -594,15 +619,6 @@
         m.position.x += 0.2; setTimeout(()=>m.position.x -= 0.2, 50);
     }
 
-    function handleKey(k, d) {
-        if(k==='KeyW') controls.fwd = d;
-        if(k==='KeyS') controls.back = d;
-        if(k==='KeyA') controls.left = d;
-        if(k==='KeyD') controls.right = d;
-        if(d && k==='Space') doDash();
-        if(d && k==='KeyE') doDomain();
-    }
-
     function doDash() {
         if(Date.now()-lastDash<CONFIG.DASH_CD || isFrozen) return;
         triggerCooldownUI('cd-dash', CONFIG.DASH_CD);
@@ -612,25 +628,25 @@
         if(!me) return;
         
         const pos = getPos(me);
-        // Si usamos mouse lock, dasheamos hacia donde mira la cámara
-        // Si no, dasheamos con WASD
         const dir = new THREE.Vector3();
         
+        // Dash direccional basado en la cámara
         if (isMouseLocked) {
-             // Dash hacia adelante de la cámara si no toco nada, o relativo a WASD
-             const camDir = getCameraDirection();
-             if (controls.fwd) { dir.copy(camDir); dir.z *= -1; } // Ajuste por coord system
-             else if (controls.back) { dir.copy(camDir); dir.z *= -1; dir.negate(); }
-             else { 
-                // Default forward dash relative to character
-                 dir.set(Math.sin(cameraAngle), 0, Math.cos(cameraAngle));
-             }
+             const fwd = new THREE.Vector3(Math.sin(cameraAngle), 0, Math.cos(cameraAngle));
+             const right = new THREE.Vector3(Math.sin(cameraAngle - Math.PI/2), 0, Math.cos(cameraAngle - Math.PI/2));
+             
+             if (controls.fwd) dir.add(fwd);
+             if (controls.back) dir.sub(fwd);
+             if (controls.left) dir.sub(right);
+             if (controls.right) dir.add(right);
+             
+             // Si no aprieto nada, dash hacia adelante de la camara
+             if (dir.lengthSq() === 0) dir.copy(fwd);
         } else {
              if(controls.fwd) dir.z-=1; if(controls.back) dir.z+=1;
              if(controls.left) dir.x-=1; if(controls.right) dir.x+=1;
         }
 
-        if(dir.length()===0) dir.z-=1; // Default
         dir.normalize();
         
         const dest = {x: pos.x+dir.x*6, z: pos.z+dir.z*6};
@@ -647,7 +663,6 @@
         const dist = Math.hypot(dx,dz);
         const R = CONFIG.DOMAIN_RADIUS;
         
-        // Bloquear salida
         if(dist > R - 0.5) {
             const a = Math.atan2(dz,dx);
             return { x: d.pos.x+Math.cos(a)*(R-0.5), z: d.pos.z+Math.sin(a)*(R-0.5) };
@@ -675,7 +690,7 @@
             const dir = new THREE.Vector3();
 
             if (isMouseLocked) {
-                // Movimiento relativo a la cámara
+                // Mover relativo a la cámara
                 const fwd = new THREE.Vector3(Math.sin(cameraAngle), 0, Math.cos(cameraAngle));
                 const right = new THREE.Vector3(Math.sin(cameraAngle - Math.PI/2), 0, Math.cos(cameraAngle - Math.PI/2));
                 
@@ -684,7 +699,6 @@
                 if (controls.left) dir.sub(right);
                 if (controls.right) dir.add(right);
             } else {
-                // Movimiento Clásico Absoluto
                 if(controls.fwd) dir.z-=1; if(controls.back) dir.z+=1;
                 if(controls.left) dir.x-=1; if(controls.right) dir.x+=1;
             }
@@ -707,10 +721,8 @@
 
             // Rotación Inteligente
             if (id === (me ? me.id : '') && isMouseLocked) {
-                // Si soy yo y tengo lock, miro donde mira la cámara
-                mesh.rotation.y = cameraAngle + Math.PI;
+                mesh.rotation.y = cameraAngle + Math.PI; // Mirar con camara
             } else {
-                // Si me muevo, miro a donde camino
                 const lp = mesh.userData.lp || p;
                 const dx = p.x - lp.x; const dz = p.z - lp.z;
                 if(Math.hypot(dx,dz) > 0.01) mesh.rotation.y = Math.atan2(dx,dz);
@@ -719,25 +731,21 @@
 
             // Head Bob
             const isMoving = (mesh.position.distanceTo(new THREE.Vector3(p.x,0,p.z)) > 0.01);
-            if(isMoving) {
-                mesh.position.y = Math.abs(Math.sin(time*10))*0.1;
-            } else {
-                mesh.position.y = 0;
-            }
+            if(isMoving) mesh.position.y = Math.abs(Math.sin(time*10))*0.1;
+            else mesh.position.y = 0;
 
-            // Ragdoll override
+            // Ragdoll
             let isRag = isOffline ? state._data.ragdoll : state.getState('ragdoll');
             if(isRag) {
                 mesh.rotation.x = -Math.PI/2; mesh.position.y = 0.5;
             } else if (!isMoving) {
-                mesh.rotation.x = 0; // Reset posture if not attacking/moving
+                mesh.rotation.x = 0;
             }
 
-            // Ocultar barra vida propia
+            // Vida Enemiga
             const bg = mesh.getObjectByName("BarBG");
             if(bg) bg.parent.visible = (id !== (me ? me.id : ''));
             if(bg && bg.parent.visible) {
-                 // Actualizar barra enemiga
                  let hp = isOffline ? state._data.hp : state.getState('hp');
                  if(hp===undefined) hp=100;
                  const fg = mesh.getObjectByName("BarFG");
@@ -746,14 +754,16 @@
             }
         }
 
-        // Cámara Orbital
+        // Cámara Orbital (TPS Real)
         if(me) {
             const p = getPos(me);
-            // Orbit Math
+            // El objetivo es mirar al jugador
+            // La cámara se pone DETRAS basado en el angulo
             const dist = 10;
-            const camX = p.x + Math.sin(cameraAngle) * dist;
-            const camZ = p.z + Math.cos(cameraAngle) * dist;
-            const camY = p.y + 5 + (cameraVertical * 5); // Simple altura variable
+            // IMPORTANTE: Para que esté detrás, restamos el seno/coseno del angulo
+            const camX = p.x - Math.sin(cameraAngle) * dist;
+            const camZ = p.z - Math.cos(cameraAngle) * dist;
+            const camY = p.y + 5 + (cameraVertical * 5); 
 
             camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.2);
             camera.lookAt(p.x, p.y + 2, p.z);
