@@ -2,13 +2,14 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Jujutsu Shenanigans – V8 (Offline Damage Fix)</title>
+  <title>Jujutsu Shenanigans – V9 (GitHub Ready)</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; user-select: none; font-family: 'Courier New', monospace; }
+    body { margin: 0; overflow: hidden; background: #111; user-select: none; font-family: 'Arial', sans-serif; }
     
     #ui-layer {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      pointer-events: none; display: flex; flex-direction: column; justify-content: space-between;
+      pointer-events: none;
+      display: flex; flex-direction: column; justify-content: space-between;
     }
 
     #status-box {
@@ -17,30 +18,20 @@
       pointer-events: auto;
     }
 
+    #controls-hint {
+      text-align: center; color: #fff; padding: 15px; font-size: 14px;
+      text-shadow: 2px 2px 0 #000; font-weight: bold; 
+      background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+    }
+
     #dead-screen {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(100, 0, 0, 0.6); display: none;
+      background: rgba(139, 0, 0, 0.6); display: none;
       align-items: center; justify-content: center;
       color: white; font-size: 50px; font-weight: 900;
       z-index: 999; text-transform: uppercase;
       text-shadow: 0 0 20px black;
     }
-
-    /* Animación de daño */
-    @keyframes shake {
-      0% { transform: translate(1px, 1px) rotate(0deg); }
-      10% { transform: translate(-1px, -2px) rotate(-1deg); }
-      20% { transform: translate(-3px, 0px) rotate(1deg); }
-      30% { transform: translate(3px, 2px) rotate(0deg); }
-      40% { transform: translate(1px, -1px) rotate(1deg); }
-      50% { transform: translate(-1px, 2px) rotate(-1deg); }
-      60% { transform: translate(-3px, 1px) rotate(0deg); }
-      70% { transform: translate(3px, 1px) rotate(-1deg); }
-      80% { transform: translate(-1px, -1px) rotate(1deg); }
-      90% { transform: translate(1px, 2px) rotate(0deg); }
-      100% { transform: translate(1px, -2px) rotate(-1deg); }
-    }
-    .shake-screen { animation: shake 0.5s; }
   </style>
 </head>
 <body>
@@ -48,10 +39,8 @@
   <div id="dead-screen">Has Muerto</div>
 
   <div id="ui-layer">
-    <div id="status-box">ESTADO: <span id="status-text" style="color:yellow">Iniciando...</span></div>
-    <div style="text-align:center; color:#fff; padding:10px; text-shadow:1px 1px 0 #000;">
-      WASD: Mover | CLICK: Golpear | ESPACIO: Dash | E: Dominio
-    </div>
+    <div id="status-box">ESTADO: <span id="status-text" style="color:yellow">Conectando...</span></div>
+    <div id="controls-hint">WASD: Mover | CLICK: M1 Combo | ESPACIO: Dash | E: Dominio</div>
   </div>
 
   <audio id="domainAudio" src="dominio.mp3"></audio>
@@ -67,82 +56,89 @@
       MAX_HP: 100,
       DASH_CD: 1000,
       PUNCH_CD: 400,
+      COMBO_RESET: 1500,
       DOMAIN_TIME: 29000,
-      HIT_DIST: 3.5 // Distancia para golpear
+      DOMAIN_RADIUS: 20
     };
 
-    // Variables
+    // Variables Globales
     let scene, camera, renderer;
     const avatars = {}; 
-    let isOffline = false;
-    
+    let isOffline = false; // Bandera crítica para evitar errores
+
     // Estado Local
     const controls = { fwd: false, back: false, left: false, right: false };
     let lastDash = 0;
     let lastPunch = 0;
+    let comboCount = 0;
+    let lastComboTime = 0;
     let isPunching = false;
+    let isRagdolled = false;
     let isFrozen = false;
     
-    // Dominio
+    // Referencias Dominio
     let activeDomain = null;
     let domainSphere = null;
     let domainFloor = null;
 
     // ==========================================
-    // 1. INICIO "BLINDADO"
+    // 1. INICIALIZACIÓN HÍBRIDA
     // ==========================================
     async function init() {
       const statusText = document.getElementById('status-text');
       const statusBox = document.getElementById('status-box');
 
       try {
-        // Intentamos conectar con timeout de 1 segundo (muy rápido para detectar error)
-        const conn = insertCoin({ skipLobby: true });
-        const time = new Promise((_, r) => setTimeout(() => r("TIMEOUT"), 1500));
+        // Intentamos conectar. Si tarda más de 2s o da error CORS, pasamos a Offline.
+        const connPromise = insertCoin({ skipLobby: true });
+        const timeoutPromise = new Promise((_, r) => setTimeout(() => r("TIMEOUT"), 2000));
         
-        await Promise.race([conn, time]);
+        await Promise.race([connPromise, timeoutPromise]);
         
         statusText.innerText = "ONLINE (Multijugador)";
         statusText.style.color = "#00ff00";
         statusBox.style.borderLeft = "5px solid #00ff00";
 
       } catch (err) {
-        console.log("Modo Offline activado por error:", err);
+        console.warn("Modo Offline activado:", err);
         isOffline = true;
-        statusText.innerText = "OFFLINE (Modo Local vs Dummy)";
+        statusText.innerText = "OFFLINE (Entrenamiento vs Dummy)";
         statusText.style.color = "#ffaa00";
         statusBox.style.borderLeft = "5px solid #ffaa00";
         
-        // Activar el Dummy Inmediatamente
-        setupDummy();
+        // Crear Bot de Entrenamiento
+        spawnDummy();
       }
 
       setupScene();
       
-      // Manejo de Jugadores
+      // Manejar jugadores que entran
       onPlayerJoin((state) => {
-        spawnPlayer(state);
+        spawnAvatar(state);
       });
 
       animate();
     }
 
     // ==========================================
-    // 2. SISTEMA DE JUGADORES Y DUMMY
+    // 2. SISTEMA DE JUGADORES
     // ==========================================
-    function spawnPlayer(state) {
+    function spawnAvatar(state) {
       const id = state.id;
-      // Seguridad de color
+      // Protección contra crash de colores
       let hex = 0xffffff;
-      try { hex = state.getProfile().color.hex; } catch(e) { hex = Math.random()*0xffffff; }
+      try { 
+          const profile = state.getProfile();
+          if(profile && profile.color) hex = profile.color.hex; 
+      } catch(e) {}
 
-      const mesh = createAvatarMesh(hex);
+      const mesh = createCharacterMesh(hex);
       scene.add(mesh);
 
       avatars[id] = { 
         mesh: mesh, 
         state: state, 
-        localHp: CONFIG.MAX_HP // Vida local para calculos offline
+        localHp: CONFIG.MAX_HP // Vida simulada para offline
       };
 
       state.onQuit(() => {
@@ -151,30 +147,29 @@
       });
     }
 
-    // Crear Dummy falso si estamos offline
-    function setupDummy() {
-      const dummyId = "dummy_bot";
+    function spawnDummy() {
+      // Simular un jugador remoto para el modo offline
       const dummyState = {
-        id: dummyId,
+        id: "dummy_bot",
         getProfile: () => ({ color: { hex: 0xff0000 } }),
-        // Estado simulado en memoria
-        _data: { pos: {x: 5, y:0, z:0}, hp: 100 },
+        // Estado interno falso
+        _data: { pos: {x:5, y:0, z:0}, hp: 100, ragdollState: false },
         getState: function(k) { return this._data[k]; },
         setState: function(k, v) { this._data[k] = v; },
         onQuit: () => {}
       };
       
-      // Simular que el dummy se une al juego
-      setTimeout(() => spawnPlayer(dummyState), 500);
+      // Retraso pequeño para simular carga
+      setTimeout(() => spawnAvatar(dummyState), 500);
     }
 
     // ==========================================
-    // 3. GRÁFICOS (THREE.JS)
+    // 3. GRÁFICOS
     // ==========================================
     function setupScene() {
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x87CEEB);
-      scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+      scene.fog = new THREE.Fog(0x87CEEB, 20, 120);
 
       camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
       camera.position.set(0, 10, 15);
@@ -184,20 +179,17 @@
       renderer.shadowMap.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // Luces
       scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-      const dl = new THREE.DirectionalLight(0xffffff, 1);
-      dl.position.set(20, 50, 20);
-      dl.castShadow = true;
-      scene.add(dl);
+      const light = new THREE.DirectionalLight(0xffffff, 1);
+      light.position.set(20, 50, 20);
+      light.castShadow = true;
+      scene.add(light);
 
-      // Suelo
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshStandardMaterial({ color: 0x228B22 }));
       floor.rotation.x = -Math.PI/2;
       floor.receiveShadow = true;
       scene.add(floor);
 
-      // Inputs
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth/window.innerHeight;
         camera.updateProjectionMatrix();
@@ -208,23 +200,18 @@
       window.addEventListener('mousedown', e => { if(e.button===0) doPunch(); });
     }
 
-    function createAvatarMesh(color) {
+    function createCharacterMesh(color) {
       const group = new THREE.Group();
-      
       const matSuit = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
       const matSkin = new THREE.MeshStandardMaterial({ color: 0xffccaa });
 
       // Torso
       const torso = new THREE.Mesh(new THREE.BoxGeometry(1, 1.2, 0.5), matSuit);
-      torso.position.y = 1.6; torso.castShadow = true; group.add(torso); // Cuerpo base
-
-      // Cuerpo Flash (Para efecto de daño)
-      const flashGeo = new THREE.BoxGeometry(1.1, 1.3, 0.6);
-      const flashMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
-      const flashMesh = new THREE.Mesh(flashGeo, flashMat);
-      flashMesh.position.y = 1.6;
-      flashMesh.name = "DamageFlash";
-      group.add(flashMesh);
+      torso.position.y = 1.6; torso.castShadow = true; group.add(torso);
+      
+      // Efecto de Daño (Flash rojo invisible)
+      const flash = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.3, 0.6), new THREE.MeshBasicMaterial({color:0xff0000, transparent:true, opacity:0}));
+      flash.position.y = 1.6; flash.name = "DamageFlash"; group.add(flash);
 
       // Cabeza
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), matSkin);
@@ -233,7 +220,6 @@
       // Brazos
       const rArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.1, 0.35), matSuit);
       rArm.position.set(0.75, 1.6, 0); rArm.name = "RightArm"; rArm.castShadow = true; group.add(rArm);
-      
       const lArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.1, 0.35), matSuit);
       lArm.position.set(-0.75, 1.6, 0); lArm.castShadow = true; group.add(lArm);
 
@@ -246,7 +232,6 @@
       // Barra de Vida
       const bg = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.2), new THREE.MeshBasicMaterial({color:0x550000}));
       bg.position.set(0, 3.5, 0); bg.name="BarBG"; group.add(bg);
-      
       const fg = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.2), new THREE.MeshBasicMaterial({color:0x00ff00}));
       fg.position.set(0, 3.5, 0.01); fg.name="BarFG"; group.add(fg);
 
@@ -254,7 +239,7 @@
     }
 
     // ==========================================
-    // 4. LÓGICA DE JUEGO (CONTROL + DAÑO)
+    // 4. LÓGICA DE JUEGO (M1 & DOMINIO)
     // ==========================================
     function handleKey(k, d) {
       if(k==='KeyW') controls.fwd = d;
@@ -268,10 +253,16 @@
     function doDash() {
       if(Date.now() - lastDash < CONFIG.DASH_CD || isFrozen) return;
       lastDash = Date.now();
-      const me = myPlayer();
-      if(!me) return;
       
-      const pos = me.getState('pos') || {x:0, y:0, z:0};
+      const me = myPlayer();
+      if(!me && !isOffline) return; // Si no hay jugador y no es offline, salir.
+      
+      // En modo offline, 'myPlayer()' puede devolver null, así que usamos el 'avatars' local si es necesario o simulamos
+      // Pero Playroom suele devolver un objeto local simulado si falla. Si no, usaremos lógica defensiva.
+      
+      let pos = {x:0, y:0, z:0};
+      if (me) pos = me.getState('pos') || pos;
+
       const dir = new THREE.Vector3();
       if(controls.fwd) dir.z -= 1;
       if(controls.back) dir.z += 1;
@@ -282,249 +273,320 @@
 
       const dest = { x: pos.x + dir.x * 6, z: pos.z + dir.z * 6 };
       const final = checkBarrier(dest.x, dest.z);
-      me.setState('pos', {x: final.x, y:0, z: final.z}, false);
+      
+      if(me) me.setState('pos', {x: final.x, y:0, z: final.z}, false);
     }
 
-    // --- GOLPEAR (Lógica Crítica) ---
     function doPunch() {
       if(Date.now() - lastPunch < CONFIG.PUNCH_CD || isFrozen || isPunching) return;
-      lastPunch = Date.now();
+      const now = Date.now();
+      
+      // Combo Reset
+      if(now - lastComboTime > CONFIG.COMBO_RESET) comboCount = 0;
+      comboCount++;
+      if(comboCount > 4) comboCount = 1;
+
+      lastPunch = now;
+      lastComboTime = now;
       isPunching = true;
 
       const me = myPlayer();
-      if(!me) return;
+      if(!me && !isOffline) return;
 
-      animateArm(me.id); // Animación local
+      // Animación
+      if(me) animateArm(me.id);
 
-      const myPos = me.getState('pos') || {x:0, y:0, z:0};
-      const damage = 10; // Daño fijo
+      // Calcular Daño
+      let damage = (comboCount === 4) ? 10 : 5; // 4to golpe duele más
+      let doRagdoll = (comboCount === 4); // 4to golpe tira al suelo
 
-      // Revisar impactos
-      for (const id in avatars) {
-        if(id === me.id) continue; // No pegarse a uno mismo
+      // Hitbox
+      let myPos = {x:0, y:0, z:0};
+      if(me) myPos = me.getState('pos') || myPos;
+
+      for(const id in avatars) {
+        if(me && id === me.id) continue; // No pegarse a uno mismo
         
         const enemy = avatars[id];
         const ePos = enemy.state.getState('pos') || {x:0, y:0, z:0};
         const dist = Math.hypot(myPos.x - ePos.x, myPos.z - ePos.z);
 
-        if(dist < CONFIG.HIT_DIST) {
-          // ¡IMPACTO CONFIRMADO!
-          console.log("Golpe a:", id);
-          
-          // 1. Efecto visual inmediato (Sangre/Flash)
-          triggerDamageEffect(id);
+        if(dist < 3.5) {
+            // ¡IMPACTO!
+            triggerDamageEffect(id);
 
-          // 2. APLICAR DAÑO (Modo Híbrido: Online + Offline)
-          if (isOffline) {
-            // Si estamos offline, modificamos la vida DIRECTAMENTE en local
-            enemy.localHp -= damage;
-            if(enemy.localHp <= 0) {
-              enemy.localHp = CONFIG.MAX_HP; // Respawn dummy
-              // Teletransportar dummy
-              enemy.state.setState('pos', {x: (Math.random()-0.5)*10, y:0, z:(Math.random()-0.5)*10});
+            if(isOffline) {
+                // Modo Local: Restar vida directamente
+                enemy.localHp -= damage;
+                if(enemy.localHp <= 0) {
+                    enemy.localHp = CONFIG.MAX_HP;
+                    enemy.state.setState('pos', {x:(Math.random()-0.5)*10, y:0, z:(Math.random()-0.5)*10});
+                }
+                enemy.state.setState('hp', enemy.localHp);
+                
+                if(doRagdoll) {
+                    enemy.state.setState('ragdollState', true);
+                    setTimeout(() => enemy.state.setState('ragdollState', false), 2000);
+                }
+            } else {
+                // Modo Online: Enviar evento
+                me.setState('attack', { target: id, dmg: damage, ragdoll: doRagdoll, id: Math.random() }, true);
             }
-            // Forzar actualización visual
-            enemy.state.setState('hp', enemy.localHp);
-          } 
-          else {
-            // Si estamos online, mandamos el mensaje a la red
-            me.setState('attack', { target: id, dmg: damage, id: Math.random() }, true);
-          }
         }
       }
 
       setTimeout(() => isPunching = false, 200);
     }
 
-    // Efecto visual de recibir daño (Flash Rojo)
-    function triggerDamageEffect(targetId) {
-      if(!avatars[targetId]) return;
-      const flash = avatars[targetId].mesh.getObjectByName("DamageFlash");
-      if(flash) {
-        flash.material.opacity = 0.8;
-        setTimeout(() => flash.material.opacity = 0, 150);
-      }
-      // Pequeño empujón al recibir golpe
-      const mesh = avatars[targetId].mesh;
-      mesh.position.y = 0.5;
-      setTimeout(() => mesh.position.y = 0, 100);
-    }
-
     function animateArm(id) {
-      if(!avatars[id]) return;
-      const arm = avatars[id].mesh.getObjectByName("RightArm");
-      if(arm) {
-        arm.rotation.x = -Math.PI/2;
-        setTimeout(() => arm.rotation.x = 0, 150);
-      }
+        if(!avatars[id]) return;
+        const arm = avatars[id].mesh.getObjectByName("RightArm");
+        if(arm) {
+            arm.rotation.x = -Math.PI/2;
+            setTimeout(() => arm.rotation.x = 0, 150);
+        }
     }
 
-    // Recibir daño Online
-    function checkIncomingDamage() {
-      if(isOffline) return; // En offline el daño es directo
-      
-      const me = myPlayer();
-      if(!me) return;
-
-      for(const id in avatars) {
-        if(id === me.id) continue;
-        const enemy = avatars[id];
-        const atk = enemy.state.getState('attack');
-        
-        if(atk && atk.target === me.id && avatars[me.id].lastDmgId !== atk.id) {
-          avatars[me.id].lastDmgId = atk.id;
-          triggerDamageEffect(me.id);
-          
-          let hp = me.getState('hp');
-          if(hp === undefined) hp = CONFIG.MAX_HP;
-          hp -= atk.dmg;
-          
-          if(hp <= 0) {
-            hp = CONFIG.MAX_HP;
-            respawn();
-          }
-          me.setState('hp', hp, true);
+    function triggerDamageEffect(id) {
+        if(!avatars[id]) return;
+        const flash = avatars[id].mesh.getObjectByName("DamageFlash");
+        if(flash) {
+            flash.material.opacity = 0.8;
+            setTimeout(() => flash.material.opacity = 0, 150);
         }
-      }
+        // Temblor
+        avatars[id].mesh.position.x += (Math.random()-0.5)*0.5;
+        setTimeout(() => avatars[id].mesh.position.x = avatars[id].state.getState('pos').x, 50);
+    }
+
+    // --- RECIBIR DAÑO ONLINE ---
+    function checkIncomingDamage() {
+        if(isOffline) return; 
+        const me = myPlayer();
+        if(!me) return;
+
+        for(const id in avatars) {
+            if(id === me.id) continue;
+            const enemy = avatars[id];
+            const atk = enemy.state.getState('attack');
+            
+            // Si hay un ataque nuevo dirigido a mí
+            if(atk && atk.target === me.id && avatars[me.id].lastDmgId !== atk.id) {
+                avatars[me.id].lastDmgId = atk.id;
+                triggerDamageEffect(me.id);
+                
+                let hp = me.getState('hp');
+                if(hp === undefined) hp = CONFIG.MAX_HP;
+                hp -= atk.dmg;
+
+                if(atk.ragdoll) {
+                    isRagdolled = true;
+                    me.setState('ragdollState', true, true);
+                    setTimeout(() => { 
+                        isRagdolled = false; 
+                        me.setState('ragdollState', false, true); 
+                    }, 2000);
+                }
+
+                if(hp <= 0) {
+                    hp = CONFIG.MAX_HP;
+                    respawn();
+                }
+                me.setState('hp', hp, true);
+            }
+        }
     }
 
     function respawn() {
-      const me = myPlayer();
-      me.setState('pos', {x:0, y:0, z:0}, true);
-      const scr = document.getElementById('dead-screen');
-      scr.style.display = 'flex';
-      setTimeout(() => scr.style.display = 'none', 1500);
+        const me = myPlayer();
+        me.setState('pos', {x:0, y:0, z:0}, true);
+        const el = document.getElementById('dead-screen');
+        el.style.display = 'flex';
+        setTimeout(() => el.style.display = 'none', 1500);
     }
 
     // ==========================================
-    // 5. DOMINIO
+    // 5. DOMINIO (EXPANSIÓN)
     // ==========================================
     function doDomain() {
-      const cur = getState('domain');
-      if(cur && cur.active) return;
-      const me = myPlayer();
-      if(!me) return;
-      
-      const pos = me.getState('pos') || {x:0,y:0,z:0};
-      setState('domain', { active: true, owner: me.id, pos: pos, id: Math.random() }, true);
-      
-      setTimeout(() => {
-        const d = getState('domain');
-        if(d && d.active && d.owner === me.id) setState('domain', {active:false}, true);
-      }, CONFIG.DOMAIN_TIME);
+        // Verificar si ya hay uno activo
+        let isAnyActive = false;
+        if(isOffline) {
+            if(activeDomain) isAnyActive = true;
+        } else {
+            const d = getState('domain');
+            if(d && d.active) isAnyActive = true;
+        }
+
+        if(isAnyActive) return;
+
+        const me = myPlayer();
+        if(!me && !isOffline) return;
+        
+        // Posición actual
+        let pos = {x:0, y:0, z:0};
+        if(me) pos = me.getState('pos') || pos;
+
+        const domainData = { active: true, owner: (me ? me.id : 'local'), pos: pos, id: Math.random() };
+
+        if(isOffline) {
+            // Activar localmente
+            applyDomainState(domainData);
+            setTimeout(() => applyDomainState({active:false}), CONFIG.DOMAIN_TIME);
+        } else {
+            // Activar en red
+            setState('domain', domainData, true);
+            setTimeout(() => {
+                const d = getState('domain');
+                if(d && d.active && d.owner === me.id) setState('domain', {active:false}, true);
+            }, CONFIG.DOMAIN_TIME);
+        }
     }
 
-    function updateDomain() {
-      const d = getState('domain');
-      if(activeDomain && (!d || !d.active || d.id !== activeDomain.id)) {
-        scene.remove(domainSphere); scene.remove(domainFloor);
-        activeDomain = null; isFrozen = false;
-        document.getElementById('domainAudio').pause();
-      }
-      if(d && d.active && !activeDomain) {
-        activeDomain = d;
-        const me = myPlayer();
-        const aud = document.getElementById('domainAudio');
-        aud.currentTime = 0; aud.play().catch(()=>{});
+    function updateDomainLoop() {
+        if(isOffline) return; // En offline ya lo manejamos directo
+        const d = getState('domain');
+        applyDomainState(d);
+    }
 
-        const sGeo = new THREE.SphereGeometry(CONFIG.DOMAIN_RADIUS, 32, 32);
-        const sMat = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.3, side:THREE.BackSide});
-        domainSphere = new THREE.Mesh(sGeo, sMat);
-        domainSphere.position.set(d.pos.x, 2, d.pos.z);
-        scene.add(domainSphere);
-
-        const fGeo = new THREE.CircleGeometry(CONFIG.DOMAIN_RADIUS, 64);
-        const fMat = new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.DoubleSide});
-        domainFloor = new THREE.Mesh(fGeo, fMat);
-        domainFloor.rotation.x = -Math.PI/2;
-        domainFloor.position.set(d.pos.x, 0.05, d.pos.z);
-        scene.add(domainFloor);
-
-        if(me) {
-          const mPos = me.getState('pos') || {x:0,y:0,z:0};
-          const dist = Math.hypot(mPos.x - d.pos.x, mPos.z - d.pos.z);
-          if(dist <= CONFIG.DOMAIN_RADIUS && me.id !== d.owner) isFrozen = true;
+    function applyDomainState(d) {
+        // Apagar
+        if(activeDomain && (!d || !d.active || d.id !== activeDomain.id)) {
+            scene.remove(domainSphere); scene.remove(domainFloor);
+            activeDomain = null; isFrozen = false;
+            document.getElementById('domainAudio').pause();
         }
-      }
+
+        // Encender
+        if(d && d.active && !activeDomain) {
+            activeDomain = d;
+            const me = myPlayer();
+            const aud = document.getElementById('domainAudio');
+            aud.currentTime = 0; aud.play().catch(()=>{});
+
+            // Visuales
+            const sGeo = new THREE.SphereGeometry(CONFIG.DOMAIN_RADIUS, 32, 32);
+            const sMat = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.3, side:THREE.BackSide});
+            domainSphere = new THREE.Mesh(sGeo, sMat);
+            domainSphere.position.set(d.pos.x, 2, d.pos.z);
+            scene.add(domainSphere);
+
+            const fGeo = new THREE.CircleGeometry(CONFIG.DOMAIN_RADIUS, 64);
+            const fMat = new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.DoubleSide});
+            domainFloor = new THREE.Mesh(fGeo, fMat);
+            domainFloor.rotation.x = -Math.PI/2;
+            domainFloor.position.set(d.pos.x, 0.05, d.pos.z);
+            scene.add(domainFloor);
+
+            // Verificar si me congelo
+            if(me || isOffline) {
+                let myPos = {x:0, y:0, z:0};
+                let myId = 'local';
+                if(me) { myPos = me.getState('pos') || myPos; myId = me.id; }
+                
+                const dist = Math.hypot(myPos.x - d.pos.x, myPos.z - d.pos.z);
+                if(dist <= CONFIG.DOMAIN_RADIUS && myId !== d.owner) {
+                    isFrozen = true;
+                }
+            }
+        }
     }
 
     function checkBarrier(x, z) {
-      if(!activeDomain) return {x,z};
-      const dx = x - activeDomain.pos.x;
-      const dz = z - activeDomain.pos.z;
-      const dist = Math.hypot(dx, dz);
-      const R = CONFIG.DOMAIN_RADIUS;
-      if(dist > R - 0.5) {
-        const a = Math.atan2(dz, dx);
-        return { x: activeDomain.pos.x + Math.cos(a)*(R-0.5), z: activeDomain.pos.z + Math.sin(a)*(R-0.5) };
-      }
-      return {x,z};
+        if(!activeDomain) return {x,z};
+        const dx = x - activeDomain.pos.x;
+        const dz = z - activeDomain.pos.z;
+        const dist = Math.hypot(dx, dz);
+        const R = CONFIG.DOMAIN_RADIUS;
+        
+        if(dist > R - 0.5) {
+            const a = Math.atan2(dz, dx);
+            return { x: activeDomain.pos.x + Math.cos(a)*(R-0.5), z: activeDomain.pos.z + Math.sin(a)*(R-0.5) };
+        }
+        return {x,z};
     }
 
     // ==========================================
     // 6. BUCLE PRINCIPAL
     // ==========================================
     function animate() {
-      requestAnimationFrame(animate);
-      const me = myPlayer();
-      if(!me) return;
+        requestAnimationFrame(animate);
+        
+        const me = myPlayer();
+        // Si estamos offline, 'me' puede ser null pero seguimos renderizando
+        if(!me && !isOffline) return; 
 
-      checkIncomingDamage();
-      updateDomain();
-
-      // Movimiento
-      if(!isFrozen) {
-        let pos = me.getState('pos') || {x:0, y:0, z:0};
-        const speed = 0.15;
-        let dx=0, dz=0;
-        if(controls.fwd) dz -= speed;
-        if(controls.back) dz += speed;
-        if(controls.left) dx -= speed;
-        if(controls.right) dx += speed;
-
-        if(dx!==0 || dz!==0) {
-          const dest = { x: pos.x + dx, z: pos.z + dz };
-          const final = checkBarrier(dest.x, dest.z);
-          me.setState('pos', { x: final.x, y: 0, z: final.z }, false);
+        if(!isOffline) {
+            checkIncomingDamage();
+            updateDomainLoop();
         }
-      }
 
-      // Render
-      for(const id in avatars) {
-        const { mesh, state } = avatars[id];
-        const p = state.getState('pos') || {x:0,y:0,z:0};
-        
-        mesh.position.lerp(new THREE.Vector3(p.x, mesh.position.y, p.z), 0.3);
-        
-        const lp = mesh.userData.lp || p;
-        const dx = p.x - lp.x;
-        const dz = p.z - lp.z;
-        if(Math.hypot(dx,dz) > 0.01) mesh.rotation.y = Math.atan2(dx, dz);
-        mesh.userData.lp = p;
+        // Movimiento Local
+        if(!isFrozen && !isRagdolled) {
+            let pos = {x:0,y:0,z:0};
+            if(me) pos = me.getState('pos') || pos;
+            
+            const speed = 0.15;
+            let dx=0, dz=0;
+            if(controls.fwd) dz -= speed;
+            if(controls.back) dz += speed;
+            if(controls.left) dx -= speed;
+            if(controls.right) dx += speed;
 
-        // ACTUALIZAR BARRA DE VIDA
-        let hp = state.getState('hp');
-        if(hp === undefined) hp = CONFIG.MAX_HP;
-        
-        const bar = mesh.getObjectByName("BarFG");
-        const bg = mesh.getObjectByName("BarBG");
-        if(bar && bg) {
-          bar.lookAt(camera.position);
-          bg.lookAt(camera.position);
-          bar.scale.x = Math.max(0, hp / CONFIG.MAX_HP);
-          bar.visible = hp > 0;
+            if(dx!==0 || dz!==0) {
+                const dest = { x: pos.x + dx, z: pos.z + dz };
+                const final = checkBarrier(dest.x, dest.z);
+                if(me) me.setState('pos', {x:final.x, y:0, z:final.z}, false);
+            }
         }
-      }
 
-      // Cámara
-      const mPos = me.getState('pos') || {x:0,y:0,z:0};
-      camera.position.lerp(new THREE.Vector3(mPos.x, 12, mPos.z + 18), 0.1);
-      camera.lookAt(mPos.x, 1, mPos.z);
+        // Renderizar Avatares
+        for(const id in avatars) {
+            const { mesh, state } = avatars[id];
+            const p = state.getState('pos') || {x:0,y:0,z:0};
+            
+            mesh.position.lerp(new THREE.Vector3(p.x, mesh.position.y, p.z), 0.3);
 
-      renderer.render(scene, camera);
+            const lastP = mesh.userData.lp || p;
+            const dx = p.x - lastP.x;
+            const dz = p.z - lastP.z;
+            if(Math.hypot(dx,dz) > 0.01) mesh.rotation.y = Math.atan2(dx, dz);
+            mesh.userData.lp = p;
+
+            // Ragdoll Visual
+            const isRag = state.getState('ragdollState');
+            if(isRag) {
+                mesh.rotation.x = -Math.PI/2; 
+                mesh.position.y = 0.5;
+            } else {
+                mesh.rotation.x = 0; 
+                mesh.position.y = 0;
+            }
+
+            // Barra de Vida
+            let hp = state.getState('hp');
+            if(hp === undefined) hp = CONFIG.MAX_HP;
+            
+            const fg = mesh.getObjectByName("BarFG");
+            const bg = mesh.getObjectByName("BarBG");
+            if(fg && bg) {
+                fg.lookAt(camera.position); bg.lookAt(camera.position);
+                fg.scale.x = Math.max(0, hp / CONFIG.MAX_HP);
+                fg.visible = hp > 0;
+            }
+        }
+
+        // Cámara
+        let cPos = {x:0, y:0, z:0};
+        if(me) cPos = me.getState('pos') || cPos;
+        
+        camera.position.lerp(new THREE.Vector3(cPos.x, 12, cPos.z + 18), 0.1);
+        camera.lookAt(cPos.x, 1, cPos.z);
+
+        renderer.render(scene, camera);
     }
 
-    init().catch(e => console.error("Error crítico:", e));
+    init().catch(console.error);
   </script>
 </body>
 </html>
