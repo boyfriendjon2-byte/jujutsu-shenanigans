@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Jujutsu Shenanigans – Alpha</title>
+  <style>
+    /* Basic page styling */
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+    }
+    #overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      z-index: 100;
+      color: #fff;
+      font-family: sans-serif;
+      font-size: 14px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Small overlay with controls information -->
+  <div id="overlay">W/A/S/D para moverte, barra espaciadora para dash, E para activar el dominio</div>
+
+  <!-- Audio element for Gojo's domain expansion. The user should place dominio.mp3 in the same folder as this file. -->
+  <audio id="domainAudio" src="dominio.mp3"></audio>
+
+  <!-- Three.js for the 3D rendering -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <!-- Playroom Kit for multiplayer. This script exposes a global `Playroom` object. -->
+  <script src="https://cdn.joinplayroom.com/playroomkit/multiplayer.full.umd.js"></script>
+  <script>
+    // Extract core functions from Playroom's global object. See the official API reference for details【450522746936457†L220-L255】.
+    const {
+      insertCoin,
+      onPlayerJoin,
+      myPlayer,
+      isHost,
+      getState,
+      setState
+    } = Playroom;
+
+    // Three.js scene objects
+    let scene, camera, renderer;
+    let terrain;
+    // A mapping of player IDs to their avatar mesh and state
+    const avatars = {};
+    // Local movement state
+    const localControls = { forward: false, back: false, left: false, right: false, dash: false };
+    // Dash cooldown counter (frames)
+    let dashCooldown = 0;
+    // Domain-related state
+    let freezeMovement = false;
+    let domainSphere = null;
+    let lastDomainSignature = null;
+
+    /**
+     * Create a simple humanoid avatar out of basic geometries. The default
+     * Roblox avatar is gray, so all parts use the same material.
+     * @returns {THREE.Group}
+     */
+    function createAvatar() {
+      const group = new THREE.Group();
+      const material = new THREE.MeshStandardMaterial({ color: 0x808080 });
+      // Body
+      const bodyGeo = new THREE.BoxGeometry(1, 1.5, 0.5);
+      const body = new THREE.Mesh(bodyGeo, material);
+      body.position.set(0, 1.0, 0);
+      group.add(body);
+      // Head
+      const headGeo = new THREE.SphereGeometry(0.4, 16, 16);
+      const head = new THREE.Mesh(headGeo, material);
+      head.position.set(0, 2.1, 0);
+      group.add(head);
+      return group;
+    }
+
+    /**
+     * Initialize Playroom, wait for players to join and create the 3D scene.
+     * Once the host launches the room (via insertCoin), the returned promise
+     * resolves and we start our game loop.
+     */
+    async function init() {
+      // Start Playroom's lobby and wait for the host to launch the game
+      await insertCoin();
+      // Create the Three.js scene
+      setupScene();
+      // Handle players joining/leaving
+      onPlayerJoin((playerState) => {
+        const id = playerState.id;
+        const avatar = createAvatar();
+        scene.add(avatar);
+        avatars[id] = { mesh: avatar, state: playerState };
+        // Remove avatar when the player quits
+        playerState.onQuit(() => {
+          scene.remove(avatars[id].mesh);
+          delete avatars[id];
+        });
+      });
+      // Start rendering loop
+      animate();
+    }
+
+    /**
+     * Configure the Three.js scene, camera, lights and terrain.
+     */
+    function setupScene() {
+      scene = new THREE.Scene();
+      scene.fog = new THREE.Fog(0xa0a0a0, 10, 200);
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 5, 10);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+      // Lighting
+      const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444);
+      hemiLight.position.set(0, 20, 0);
+      scene.add(hemiLight);
+      const dirLight = new THREE.DirectionalLight(0xffffff);
+      dirLight.position.set(-3, 10, -10);
+      scene.add(dirLight);
+      // Green terrain
+      const planeGeo = new THREE.PlaneGeometry(200, 200);
+      const planeMat = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+      terrain = new THREE.Mesh(planeGeo, planeMat);
+      terrain.rotation.x = -Math.PI / 2;
+      scene.add(terrain);
+      // Event listeners
+      window.addEventListener('resize', onWindowResize);
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
+    }
+
+    // Resize handling
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // Key controls
+    function onKeyDown(e) {
+      if (e.code === 'KeyW') localControls.forward = true;
+      if (e.code === 'KeyS') localControls.back = true;
+      if (e.code === 'KeyA') localControls.left = true;
+      if (e.code === 'KeyD') localControls.right = true;
+      if (e.code === 'Space') localControls.dash = true;
+      if (e.code === 'KeyE') triggerDomain();
+    }
+    function onKeyUp(e) {
+      if (e.code === 'KeyW') localControls.forward = false;
+      if (e.code === 'KeyS') localControls.back = false;
+      if (e.code === 'KeyA') localControls.left = false;
+      if (e.code === 'KeyD') localControls.right = false;
+      if (e.code === 'Space') localControls.dash = false;
+    }
+
+    /**
+     * Activate Gojo's domain expansion. The player who activates the domain
+     * becomes immune to the freeze, while all other players cannot move. A white
+     * sphere appears around the domain area and the accompanying audio plays.
+     * The domain persists for roughly 29 seconds (matching the audio length).
+     */
+    function triggerDomain() {
+      const currentDomain = getState('domain');
+      if (currentDomain && currentDomain.active) return; // Already active
+      const player = myPlayer();
+      if (!player) return;
+      const myId = player.id;
+      // Get current position (defaults to origin)
+      const pos = player.getState('pos') || { x: 0, y: 0, z: 0 };
+      // Set shared domain state. Mark as reliable so all players receive it via WebSockets【450522746936457†L243-L250】.
+      setState('domain', { active: true, owner: myId, position: pos, started: Date.now() }, true);
+      // Schedule domain termination after 29 seconds in case audio does not end
+      setTimeout(() => {
+        const dom = getState('domain');
+        if (dom && dom.active) {
+          setState('domain', { active: false }, true);
+        }
+      }, 29000);
+    }
+
+    /**
+     * Update local freeze state and the white sphere based on the domain. This
+     * method compares a signature of the domain data to prevent unnecessary
+     * re‑creation of meshes or repeated audio resets. It is called once per
+     * frame.
+     *
+     * @param {Object} domain The shared domain object from Playroom state
+     */
+    function updateDomainVisual(domain) {
+      // Compute a simple signature string to detect changes
+      const signature = domain && domain.active
+        ? `${domain.active}:${domain.owner}:${domain.position && domain.position.x},${domain.position && domain.position.z}`
+        : 'inactive';
+      if (signature === lastDomainSignature) {
+        return;
+      }
+      lastDomainSignature = signature;
+      // Remove existing sphere and reset movement/audio on deactivation
+      if (!domain || !domain.active) {
+        if (domainSphere) {
+          scene.remove(domainSphere);
+          domainSphere = null;
+        }
+        freezeMovement = false;
+        const audio = document.getElementById('domainAudio');
+        audio.pause();
+        audio.currentTime = 0;
+        return;
+      }
+      // Domain is active. Freeze everyone except the owner
+      const myId = myPlayer() && myPlayer().id;
+      freezeMovement = myId !== domain.owner;
+      // Play audio once
+      const audio = document.getElementById('domainAudio');
+      if (audio.paused) {
+          audio.play().catch(() => {});
+      }
+      // Create new sphere visual
+      if (domainSphere) {
+        scene.remove(domainSphere);
+        domainSphere = null;
+      }
+      const sphereGeometry = new THREE.SphereGeometry(15, 32, 32);
+      const sphereMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 });
+      domainSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      const position = domain.position || { x: 0, y: 0, z: 0 };
+      domainSphere.position.set(position.x, 3, position.z);
+      scene.add(domainSphere);
+    }
+
+    /**
+     * Main animation loop. This function updates player positions, handles
+     * dashing, keeps the camera following the local player, and updates
+     * domain visuals/freeze state each frame.
+     */
+    function animate() {
+      requestAnimationFrame(animate);
+      const player = myPlayer();
+      // Pull domain state each frame and update visuals
+      const domain = getState('domain');
+      updateDomainVisual(domain);
+      // Move local player when not frozen
+      if (player && !freezeMovement) {
+        let pos = player.getState('pos') || { x: 0, y: 0, z: 0 };
+        const baseSpeed = 0.05;
+        // Dash: a quick burst of speed when pressing space. Only allowed when cooldown is zero.
+        if (localControls.dash && dashCooldown <= 0) {
+          dashCooldown = 30; // around half a second at 60fps
+          // Determine the dash direction based on current movement keys. If no movement keys are pressed, dash forward.
+          const dashDir = new THREE.Vector3();
+          if (localControls.forward) dashDir.z -= 1;
+          if (localControls.back) dashDir.z += 1;
+          if (localControls.left) dashDir.x -= 1;
+          if (localControls.right) dashDir.x += 1;
+          // Default dash forward
+          if (dashDir.length() === 0) dashDir.z -= 1;
+          dashDir.normalize();
+          pos.x += dashDir.x * 3;
+          pos.z += dashDir.z * 3;
+        } else {
+          if (localControls.forward) pos.z -= baseSpeed;
+          if (localControls.back) pos.z += baseSpeed;
+          if (localControls.left) pos.x -= baseSpeed;
+          if (localControls.right) pos.x += baseSpeed;
+        }
+        // Decrement dash cooldown
+        if (dashCooldown > 0) dashCooldown--;
+        // Clamp within map boundaries
+        pos.x = Math.max(-99, Math.min(99, pos.x));
+        pos.z = Math.max(-99, Math.min(99, pos.z));
+        player.setState('pos', pos, false);
+      }
+      // Update each avatar's position based on its player state
+      for (const id in avatars) {
+        const { mesh, state } = avatars[id];
+        const p = state.getState('pos') || { x: 0, y: 0, z: 0 };
+        mesh.position.set(p.x, 0, p.z);
+      }
+      // Camera follows the local player
+      const lp = player && player.getState('pos');
+      const target = lp || { x: 0, y: 0, z: 0 };
+      // Use lerp for smooth camera motion
+      const camTarget = new THREE.Vector3(target.x, 5, target.z + 10);
+      camera.position.lerp(camTarget, 0.1);
+      camera.lookAt(new THREE.Vector3(target.x, 1, target.z));
+      renderer.render(scene, camera);
+    }
+
+    // Start everything
+    init().catch((err) => {
+      console.error('Error initializing game:', err);
+    });
+  </script>
+</body>
+</html>
