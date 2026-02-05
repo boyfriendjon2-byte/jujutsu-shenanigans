@@ -2,9 +2,11 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Jujutsu Shenanigans – V12 (HP Fix)</title>
+  <title>Jujutsu Shenanigans – V13 (Visual & Combat Overhaul)</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #111; user-select: none; font-family: 'Arial', sans-serif; }
+    @import url('https://fonts.googleapis.com/css2?family=Anton&display=swap');
+
+    body { margin: 0; overflow: hidden; background: #000; user-select: none; font-family: 'Anton', sans-serif; }
     
     #ui-layer {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -12,46 +14,122 @@
       display: flex; flex-direction: column; justify-content: space-between;
     }
 
-    #status-box {
-      background: rgba(0,0,0,0.8); color: white; padding: 10px;
-      margin: 10px; border-radius: 5px; border-left: 5px solid yellow;
-      pointer-events: auto;
+    /* --- NUEVA UI --- */
+    #hud-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding: 20px;
+      width: 100%;
+      box-sizing: border-box;
     }
 
+    /* Barra de Vida Local */
+    .health-container {
+      width: 300px;
+      pointer-events: auto;
+    }
+    .health-label {
+      color: white; font-size: 20px; text-shadow: 2px 2px 0 #000; letter-spacing: 1px;
+      margin-bottom: 5px;
+    }
+    .health-bar-bg {
+      width: 100%; height: 25px; background: #330000;
+      border: 2px solid #fff; transform: skewX(-20deg);
+      overflow: hidden;
+    }
+    .health-bar-fill {
+      width: 100%; height: 100%; background: #00ff00;
+      transition: width 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      box-shadow: 0 0 10px #00ff00;
+    }
+
+    /* Habilidades */
+    .skills-container {
+      display: flex; gap: 15px; margin-bottom: 10px; margin-right: 40px;
+    }
+    .skill-box {
+      width: 60px; height: 60px; background: rgba(0,0,0,0.7);
+      border: 2px solid #fff; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 24px; position: relative;
+      overflow: hidden; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+    .skill-key {
+      position: absolute; top: 2px; left: 4px; font-size: 12px; color: #ffff00;
+    }
+    .cooldown-overlay {
+      position: absolute; bottom: 0; left: 0; width: 100%; height: 0%;
+      background: rgba(255, 0, 0, 0.7);
+      transition: height 0.1s linear;
+    }
+
+    /* Pantalla de Muerte */
     #dead-screen {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(139, 0, 0, 0.6); display: none;
+      background: rgba(100, 0, 0, 0.6); display: none;
       align-items: center; justify-content: center;
-      color: white; font-size: 50px; font-weight: 900;
-      z-index: 999; text-transform: uppercase;
-      text-shadow: 0 0 20px black;
+      color: white; font-size: 80px; text-transform: uppercase;
+      text-shadow: 0 0 30px black; animation: pulseDeath 2s infinite;
+      z-index: 999;
     }
-    
+    @keyframes pulseDeath { 0% { opacity: 0.8; } 50% { opacity: 1; transform: scale(1.05); } 100% { opacity: 0.8; } }
+
+    /* Números de Daño */
     .damage-text {
-        position: absolute;
-        color: #ff3333;
-        font-weight: 900;
-        font-size: 24px;
-        text-shadow: 2px 2px 0 #000;
-        pointer-events: none;
-        animation: floatUp 1s forwards;
+        position: absolute; color: #ff3333; font-weight: 900; font-size: 32px;
+        text-shadow: 2px 2px 0 #000; pointer-events: none;
+        animation: floatUp 0.8s forwards ease-out;
     }
-    
     @keyframes floatUp {
         0% { transform: translateY(0) scale(1); opacity: 1; }
-        100% { transform: translateY(-50px) scale(1.5); opacity: 0; }
+        100% { transform: translateY(-80px) scale(1.5) rotate(10deg); opacity: 0; }
+    }
+    
+    /* Estado de Conexión */
+    #connection-status {
+        position: absolute; top: 10px; right: 10px;
+        color: white; font-family: monospace; font-size: 12px;
+        background: rgba(0,0,0,0.5); padding: 5px;
     }
   </style>
 </head>
 <body>
 
-  <div id="dead-screen">Has Muerto</div>
+  <div id="dead-screen">WASTED</div>
   <div id="damage-container"></div>
+  <div id="connection-status">Conectando...</div>
 
   <div id="ui-layer">
-    <div id="status-box">ESTADO: <span id="status-text" style="color:yellow">Iniciando...</span></div>
-    <div style="text-align:center; color:#fff; padding:15px; font-weight:bold; text-shadow:1px 1px 0 #000;">
-      CLICK: Combo | ESPACIO: Dash | E: Dominio | WASD: Mover
+    <div></div>
+
+    <div id="hud-bottom">
+      
+      <div class="health-container">
+        <div class="health-label">HP <span id="hp-text">100/100</span></div>
+        <div class="health-bar-bg">
+          <div id="my-health-bar" class="health-bar-fill"></div>
+        </div>
+      </div>
+
+      <div class="skills-container">
+        <div class="skill-box">
+          <div class="skill-key">M1</div>
+          👊
+          <div id="cd-punch" class="cooldown-overlay"></div>
+        </div>
+        <div class="skill-box">
+          <div class="skill-key">SPACE</div>
+          💨
+          <div id="cd-dash" class="cooldown-overlay"></div>
+        </div>
+        <div class="skill-box" style="border-color: #a855f7;">
+          <div class="skill-key">E</div>
+          🤞
+          <div id="cd-domain" class="cooldown-overlay"></div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -63,14 +141,15 @@
   <script>
     const { insertCoin, onPlayerJoin, myPlayer, getState, setState } = Playroom;
 
-    // --- CONFIGURACIÓN ---
+    // --- CONFIGURACIÓN BALANCEADA (DAÑO AUMENTADO) ---
     const CONFIG = {
       MAX_HP: 100,
-      HIT_DIST: 3.5,
-      DMG_NORMAL: 8,  // Subimos un poco el daño para que se note
-      DMG_FINISHER: 15,
-      DASH_CD: 1000,
-      PUNCH_CD: 400
+      HIT_DIST: 4.0,     // Rango de golpe ligeramente mayor
+      DMG_NORMAL: 15,    // Daño aumentado (antes 8)
+      DMG_FINISHER: 25,  // Daño final aumentado (antes 15)
+      DASH_CD: 1500,     // 1.5s
+      PUNCH_CD: 500,     // 0.5s
+      DOMAIN_TIME: 29000 // 29s
     };
 
     // Globales
@@ -84,21 +163,23 @@
     let lastPunch = 0;
     let comboCount = 0;
     let lastComboTime = 0;
+    
+    // Flags de estado
     let isPunching = false;
     let isFrozen = false;
     let isRagdolled = false;
 
     // Dominio
     let activeDomain = null;
-    let domainSphere = null;
+    let domainGroup = null; // Grupo para contener estrellas y esfera
 
     // ==========================================
     // 1. INICIO
     // ==========================================
     async function init() {
-      const statusText = document.getElementById('status-text');
-      const statusBox = document.getElementById('status-box');
+      const statusLabel = document.getElementById('connection-status');
 
+      // Detector de modo local
       if (window.location.protocol === 'file:') {
         activateOffline("OFFLINE (Modo Local)");
       } else {
@@ -107,11 +188,10 @@
           const timeoutPromise = new Promise((_, r) => setTimeout(() => r("TIMEOUT"), 2000));
           await Promise.race([connPromise, timeoutPromise]);
           
-          statusText.innerText = "ONLINE (Multijugador)";
-          statusText.style.color = "#00ff00";
-          statusBox.style.borderLeft = "5px solid #00ff00";
+          statusLabel.innerText = "ONLINE ✅";
+          statusLabel.style.color = "#00ff00";
         } catch (err) {
-          activateOffline("OFFLINE (Fallo Red)");
+          activateOffline("OFFLINE (Fallo Red) ⚠️");
         }
       }
 
@@ -129,15 +209,13 @@
 
     function activateOffline(msg) {
         isOffline = true;
-        const st = document.getElementById('status-text');
-        const sb = document.getElementById('status-box');
-        st.innerText = msg;
-        st.style.color = "#ffaa00";
-        sb.style.borderLeft = "5px solid #ffaa00";
+        const sl = document.getElementById('connection-status');
+        sl.innerText = msg;
+        sl.style.color = "yellow";
     }
 
     // ==========================================
-    // 2. SISTEMA DE JUGADORES
+    // 2. SISTEMA DE AVATARES
     // ==========================================
     function spawnAvatar(state) {
       const id = state.id;
@@ -147,8 +225,7 @@
       const mesh = createMesh(hex);
       scene.add(mesh);
 
-      // INICIALIZAR VIDA (Importante para que la barra no salga vacía)
-      // Si soy yo, establezco mi vida en 100 en la red.
+      // Inicializar HP en red
       if (!isOffline && myPlayer().id === id) {
           state.setState('hp', CONFIG.MAX_HP, true);
       }
@@ -156,7 +233,8 @@
       avatars[id] = { 
           mesh: mesh, 
           state: state, 
-          lastDmgId: null
+          lastDmgId: null,
+          walkTime: 0 // Para animación de caminar
       };
 
       state.onQuit(() => {
@@ -190,12 +268,13 @@
     }
 
     // ==========================================
-    // 3. COMBATE (FIX DEFINITIVO)
+    // 3. COMBATE
     // ==========================================
     function doPunch() {
         const now = Date.now();
         if(now - lastPunch < CONFIG.PUNCH_CD || isFrozen || isPunching || isRagdolled) return;
         
+        // Reset combo
         if(now - lastComboTime > 1500) comboCount = 0;
         comboCount++;
         if(comboCount > 4) comboCount = 1;
@@ -204,10 +283,14 @@
         lastComboTime = now;
         isPunching = true;
 
+        // UI Cooldown
+        triggerCooldownUI('cd-punch', CONFIG.PUNCH_CD);
+
         const me = getMe();
         if(!me) return;
 
-        animateArm(me.id);
+        // ANIMACIÓN DE GOLPE (Cuerpo + Brazo)
+        animateAttack(me.id);
 
         const damage = (comboCount === 4) ? CONFIG.DMG_FINISHER : CONFIG.DMG_NORMAL;
         const doRagdoll = (comboCount === 4);
@@ -221,12 +304,12 @@
             const dist = Math.hypot(myPos.x - tPos.x, myPos.z - tPos.z);
 
             if(dist < CONFIG.HIT_DIST) {
-                // VISUALES DE IMPACTO
+                // VISUALES
                 triggerHitEffect(id);
-                showDamageNumber(tPos, damage);
+                showDamageNumber(tPos, damage, doRagdoll);
 
                 if(isOffline) {
-                    // MODO OFFLINE: Modificamos directo
+                    // OFFLINE
                     let currentHp = target.state.getState('hp');
                     currentHp -= damage;
                     if(currentHp <= 0) {
@@ -234,13 +317,12 @@
                         target.state.setState('pos', {x:(Math.random()-0.5)*10, y:0, z:(Math.random()-0.5)*10});
                     }
                     target.state.setState('hp', currentHp);
-                    
                     if(doRagdoll) {
                         target.state.setState('ragdoll', true);
                         setTimeout(() => target.state.setState('ragdoll', false), 2500);
                     }
                 } else {
-                    // MODO ONLINE: Enviamos ataque
+                    // ONLINE
                     me.setState('attackData', {
                         targetId: id,
                         dmg: damage,
@@ -258,23 +340,19 @@
         const me = getMe();
         if(!me) return;
 
-        // Revisar ataques de otros
         for(const id in avatars) {
             if(id === me.id) continue;
             const attacker = avatars[id];
             const attack = attacker.state.getState('attackData');
 
-            // Si hay ataque dirigido a mí
             if(attack && attack.targetId === me.id && avatars[me.id].lastDmgId !== attack.hitId) {
                 avatars[me.id].lastDmgId = attack.hitId; 
 
                 triggerHitEffect(me.id);
-                showDamageNumber(getPos(me), attack.dmg);
+                showDamageNumber(getPos(me), attack.dmg, attack.ragdoll);
 
-                // BAJAR MI PROPIA VIDA
                 let myHp = me.getState('hp');
-                if(myHp === undefined || myHp === null) myHp = CONFIG.MAX_HP;
-                
+                if(myHp === undefined) myHp = CONFIG.MAX_HP;
                 myHp -= attack.dmg;
 
                 if(attack.ragdoll) {
@@ -288,9 +366,212 @@
                     respawn();
                 }
 
-                me.setState('hp', myHp, true); // Guardar en red
+                me.setState('hp', myHp, true);
+                updateHealthUI(myHp);
             }
         }
+    }
+
+    // ==========================================
+    // 4. ANIMACIONES Y EFECTOS
+    // ==========================================
+    
+    // Animación de Golpe Mejorada: Mueve el torso y rota el brazo
+    function animateAttack(id) {
+        if(!avatars[id]) return;
+        const mesh = avatars[id].mesh;
+        const torso = mesh.getObjectByName("Torso");
+        const arm = mesh.getObjectByName("RightArm");
+        
+        if(arm && torso) {
+            // Brazo arriba
+            arm.rotation.x = -Math.PI / 1.8;
+            // Cuerpo adelante (Lunge)
+            torso.rotation.x = 0.2;
+            torso.position.z = -0.3; // Local Z
+
+            setTimeout(() => {
+                arm.rotation.x = 0;
+                torso.rotation.x = 0;
+                torso.position.z = 0;
+            }, 200);
+        }
+    }
+
+    // Animación de Caminar (Head Bobbing)
+    function animateWalk(id, isMoving, time) {
+        if(!avatars[id]) return;
+        const mesh = avatars[id].mesh;
+        
+        if(isMoving) {
+            // Balanceo arriba y abajo
+            mesh.position.y = Math.sin(time * 15) * 0.1; 
+            // Balanceo de brazos
+            const rArm = mesh.getObjectByName("RightArm");
+            const lArm = mesh.getObjectByName("LeftArm");
+            if(rArm) rArm.rotation.x = Math.sin(time * 15) * 0.5;
+            if(lArm) lArm.rotation.x = Math.sin(time * 15 + Math.PI) * 0.5;
+        } else {
+            // Reset
+            mesh.position.y = 0;
+            const rArm = mesh.getObjectByName("RightArm");
+            const lArm = mesh.getObjectByName("LeftArm");
+            if(rArm) rArm.rotation.x = 0;
+            if(lArm) lArm.rotation.x = 0;
+        }
+    }
+
+    function showDamageNumber(pos, dmg, isCrit) {
+        const vector = new THREE.Vector3(pos.x, 3, pos.z);
+        vector.project(camera);
+        
+        const x = (vector.x * .5 + .5) * window.innerWidth;
+        const y = (-(vector.y * .5) + .5) * window.innerHeight;
+
+        const el = document.createElement('div');
+        el.className = 'damage-text';
+        el.innerText = `-${dmg}`;
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        
+        if(isCrit) {
+            el.style.color = "#ff00ff"; // Critico (Ragdoll) en morado
+            el.style.fontSize = "40px";
+            el.innerText += "!";
+        }
+
+        document.getElementById('damage-container').appendChild(el);
+        setTimeout(() => el.remove(), 800);
+    }
+
+    // ==========================================
+    // 5. DOMINIO CÓSMICO (MEJORA VISUAL)
+    // ==========================================
+    function createCosmicDomain(pos) {
+        const group = new THREE.Group();
+        group.position.set(pos.x, 2, pos.z);
+
+        // 1. Esfera del Vacío (Púrpura Oscuro / Negro)
+        const geo = new THREE.SphereGeometry(CONFIG.DOMAIN_RADIUS, 64, 64);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0x1a0033, // Púrpura muy oscuro
+            side: THREE.BackSide,
+            transparent: true,
+            opacity: 0.95
+        });
+        const sphere = new THREE.Mesh(geo, mat);
+        group.add(sphere);
+
+        // 2. Estrellas (Partículas)
+        const starGeo = new THREE.BufferGeometry();
+        const starCount = 1000;
+        const posArray = new Float32Array(starCount * 3);
+        
+        for(let i=0; i<starCount * 3; i++) {
+            // Estrellas dentro de la esfera
+            posArray[i] = (Math.random() - 0.5) * CONFIG.DOMAIN_RADIUS * 1.8;
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        
+        const starMat = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 0.3,
+            transparent: true,
+            opacity: 0.8
+        });
+        const starField = new THREE.Points(starGeo, starMat);
+        group.add(starField);
+
+        // 3. Suelo de agua (Reflejo simple)
+        const floorGeo = new THREE.CircleGeometry(CONFIG.DOMAIN_RADIUS - 0.5, 64);
+        const floorMat = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            transparent: true, opacity: 0.5, side: THREE.DoubleSide
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = Math.PI / 2;
+        floor.position.y = -1.9; // Casi en el suelo
+        group.add(floor);
+
+        return group;
+    }
+
+    function doDomain() {
+        if(isFrozen) return;
+        const me = getMe();
+        if(!me) return;
+
+        // Verificar cooldown UI
+        const ui = document.getElementById('cd-domain');
+        if(ui.style.height && ui.style.height !== '0%') return;
+
+        triggerCooldownUI('cd-domain', CONFIG.DOMAIN_TIME);
+
+        const pos = getPos(me);
+        const data = { active: true, owner: me.id, pos: pos, id: Math.random() };
+
+        if(isOffline) {
+            activeDomain = data;
+            updateDomainVisuals(data);
+            setTimeout(() => { activeDomain=null; updateDomainVisuals(null); }, CONFIG.DOMAIN_TIME);
+        } else {
+            setState('domain', data, true);
+            setTimeout(() => {
+                const d = getState('domain');
+                if(d && d.owner===me.id) setState('domain', {active:false}, true);
+            }, CONFIG.DOMAIN_TIME);
+        }
+    }
+
+    function updateDomainVisuals(d) {
+        // Limpiar
+        if(!d || !d.active) {
+            if(domainGroup) { scene.remove(domainGroup); domainGroup=null; }
+            document.getElementById('domainAudio').pause();
+            isFrozen=false;
+            return;
+        }
+        
+        // Crear
+        if(!domainGroup) {
+            const aud = document.getElementById('domainAudio');
+            aud.currentTime=0; aud.play().catch(()=>{});
+            
+            domainGroup = createCosmicDomain(d.pos);
+            scene.add(domainGroup);
+        }
+
+        // Freeze Check
+        const me = getMe();
+        if(me) {
+            const mp = getPos(me);
+            const dist = Math.hypot(mp.x-d.pos.x, mp.z-d.pos.z);
+            if(dist <= CONFIG.DOMAIN_RADIUS && me.id !== d.owner) isFrozen=true;
+        }
+    }
+
+    // ==========================================
+    // 6. UI Y UTILS
+    // ==========================================
+    function triggerCooldownUI(elementId, timeMs) {
+        const el = document.getElementById(elementId);
+        el.style.height = '100%';
+        el.style.transition = `height ${timeMs}ms linear`;
+        // Forzar reflow
+        el.offsetHeight; 
+        el.style.height = '0%';
+    }
+
+    function updateHealthUI(hp) {
+        const fill = document.getElementById('my-health-bar');
+        const text = document.getElementById('hp-text');
+        const pct = Math.max(0, (hp / CONFIG.MAX_HP) * 100);
+        
+        fill.style.width = `${pct}%`;
+        text.innerText = `${Math.ceil(hp)}/${CONFIG.MAX_HP}`;
+        
+        if(pct < 30) fill.style.background = "#ff0000";
+        else fill.style.background = "#00ff00";
     }
 
     function getMe() {
@@ -303,27 +584,18 @@
         return state.getState('pos') || {x:0,y:0,z:0};
     }
 
-    // ==========================================
-    // 4. VISUALES (EFECTOS)
-    // ==========================================
-    function showDamageNumber(pos, dmg) {
-        // Convertir posición 3D a 2D para el texto
-        const vector = new THREE.Vector3(pos.x, 3, pos.z);
-        vector.project(camera);
-        
-        const x = (vector.x * .5 + .5) * window.innerWidth;
-        const y = (-(vector.y * .5) + .5) * window.innerHeight;
-
-        const el = document.createElement('div');
-        el.className = 'damage-text';
-        el.innerText = `-${dmg}`;
-        el.style.left = `${x}px`;
-        el.style.top = `${y}px`;
-        document.getElementById('damage-container').appendChild(el);
-
-        setTimeout(() => el.remove(), 1000);
+    function respawn() {
+        const me = getMe();
+        me.setState('pos', {x:0,y:0,z:0}, true);
+        const s = document.getElementById('dead-screen');
+        s.style.display='flex';
+        setTimeout(()=>s.style.display='none', 2000);
+        updateHealthUI(CONFIG.MAX_HP);
     }
 
+    // ==========================================
+    // 7. SETUP GRÁFICO BÁSICO
+    // ==========================================
     function setupScene() {
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x87CEEB);
@@ -335,7 +607,7 @@
 
       scene.add(new THREE.AmbientLight(0xffffff, 0.6));
       const l = new THREE.DirectionalLight(0xffffff, 1);
-      l.position.set(20,50,20); scene.add(l);
+      l.position.set(20,50,20); l.castShadow=true; scene.add(l);
       
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(300,300), new THREE.MeshStandardMaterial({color:0x228B22}));
       floor.rotation.x = -Math.PI/2; scene.add(floor);
@@ -352,11 +624,12 @@
 
     function createMesh(color) {
       const g = new THREE.Group();
-      const mat = new THREE.MeshStandardMaterial({color:0x222});
+      const mat = new THREE.MeshStandardMaterial({color:0x1a1a1a});
       const skin = new THREE.MeshStandardMaterial({color:0xffccaa});
 
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1,1.2,0.5), mat);
-      body.position.y=1.6; g.add(body);
+      // Torso (Nombrado para animar)
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(1,1.2,0.5), mat);
+      torso.position.y=1.6; torso.name="Torso"; g.add(torso);
       
       const flash = new THREE.Mesh(new THREE.BoxGeometry(1.1,1.3,0.6), new THREE.MeshBasicMaterial({color:0xff0000, transparent:true, opacity:0}));
       flash.position.y=1.6; flash.name="HitFlash"; g.add(flash);
@@ -366,26 +639,21 @@
 
       const rArm = new THREE.Mesh(new THREE.BoxGeometry(0.35,1.1,0.35), mat);
       rArm.position.set(0.75,1.6,0); rArm.name="RightArm"; g.add(rArm);
-      
       const lArm = new THREE.Mesh(new THREE.BoxGeometry(0.35,1.1,0.35), mat);
-      lArm.position.set(-0.75,1.6,0); g.add(lArm);
+      lArm.position.set(-0.75,1.6,0); lArm.name="LeftArm"; g.add(lArm);
 
       const rLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4,1.1,0.4), mat);
       rLeg.position.set(0.25,0.55,0); g.add(rLeg);
       const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4,1.1,0.4), mat);
       lLeg.position.set(-0.25,0.55,0); g.add(lLeg);
 
+      // Barra Vida (Solo para enemigos)
       const bg = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.2), new THREE.MeshBasicMaterial({color:0x550000}));
       bg.position.set(0,3.5,0); bg.name="BarBG"; g.add(bg);
       const fg = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.2), new THREE.MeshBasicMaterial({color:0x00ff00}));
       fg.position.set(0,3.5,0.01); fg.name="BarFG"; g.add(fg);
 
       return g;
-    }
-
-    function animateArm(id) {
-        const a = avatars[id]?.mesh.getObjectByName("RightArm");
-        if(a) { a.rotation.x = -Math.PI/2; setTimeout(()=>a.rotation.x=0, 150); }
     }
 
     function triggerHitEffect(id) {
@@ -406,8 +674,11 @@
     }
 
     function doDash() {
-        if(Date.now()-lastDash<CONFIG.DASH_CD || isFrozen || isRagdolled) return;
+        if(Date.now()-lastDash<CONFIG.DASH_CD || isFrozen) return;
+        
+        triggerCooldownUI('cd-dash', CONFIG.DASH_CD);
         lastDash=Date.now();
+        
         const me = getMe();
         if(!me) return;
         
@@ -423,56 +694,6 @@
         me.setState('pos', {x:final.x, y:0, z:final.z}, false);
     }
 
-    function doDomain() {
-        if(isOffline && activeDomain) return;
-        if(!isOffline && getState('domain')?.active) return;
-        
-        const me = getMe();
-        if(!me) return;
-        const pos = getPos(me);
-
-        const data = { active:true, owner:me.id, pos:pos, id:Math.random() };
-        
-        if(isOffline) {
-            activeDomain = data;
-            updateDomainVisuals(data);
-            setTimeout(() => { activeDomain=null; updateDomainVisuals(null); }, 29000);
-        } else {
-            setState('domain', data, true);
-            setTimeout(() => {
-                const d = getState('domain');
-                if(d && d.owner===me.id) setState('domain', {active:false}, true);
-            }, 29000);
-        }
-    }
-
-    function updateDomainVisuals(d) {
-        if(!d || !d.active) {
-            if(domainSphere) { scene.remove(domainSphere); domainSphere=null; }
-            document.getElementById('domainAudio').pause();
-            isFrozen=false;
-            return;
-        }
-        
-        if(!domainSphere) {
-            const aud = document.getElementById('domainAudio');
-            aud.currentTime=0; aud.play().catch(()=>{});
-            
-            const g = new THREE.SphereGeometry(20,32,32);
-            const m = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.3, side:THREE.BackSide});
-            domainSphere = new THREE.Mesh(g,m);
-            domainSphere.position.set(d.pos.x, 2, d.pos.z);
-            scene.add(domainSphere);
-        }
-
-        const me = getMe();
-        if(me) {
-            const mp = getPos(me);
-            const dist = Math.hypot(mp.x-d.pos.x, mp.z-d.pos.z);
-            if(dist<=20 && me.id!==d.owner) isFrozen=true;
-        }
-    }
-
     function checkBarrier(x,z) {
         let d = isOffline ? activeDomain : getState('domain');
         if(!d || !d.active) return {x,z};
@@ -480,25 +701,15 @@
         const dx = x - d.pos.x;
         const dz = z - d.pos.z;
         const dist = Math.hypot(dx,dz);
-        const R = CONFIG.DOMAIN_RADIUS;
-        
-        if(dist > R - 0.5) {
+        if(dist > CONFIG.DOMAIN_RADIUS - 0.5) {
             const a = Math.atan2(dz,dx);
-            return { x: d.pos.x+Math.cos(a)*(R-0.5), z: d.pos.z+Math.sin(a)*(R-0.5) };
+            return { x: d.pos.x+Math.cos(a)*(CONFIG.DOMAIN_RADIUS-0.5), z: d.pos.z+Math.sin(a)*(CONFIG.DOMAIN_RADIUS-0.5) };
         }
         return {x,z};
     }
 
-    function respawn() {
-        const me = getMe();
-        me.setState('pos', {x:0,y:0,z:0}, true);
-        const s = document.getElementById('dead-screen');
-        s.style.display='flex';
-        setTimeout(()=>s.style.display='none', 2000);
-    }
-
     // ==========================================
-    // 5. LOOP
+    // 8. BUCLE PRINCIPAL
     // ==========================================
     function animate() {
         requestAnimationFrame(animate);
@@ -510,6 +721,8 @@
 
         const me = getMe();
 
+        // Movimiento
+        let isMoving = false;
         if(me && !isFrozen && !isRagdolled) {
             let pos = getPos(me);
             const speed = 0.15;
@@ -518,46 +731,65 @@
             if(controls.left) dx-=speed; if(controls.right) dx+=speed;
             
             if(dx!==0 || dz!==0) {
+                isMoving = true;
                 const dest = {x: pos.x+dx, z: pos.z+dz};
                 const fin = checkBarrier(dest.x, dest.z);
                 me.setState('pos', {x:fin.x, y:0, z:fin.z}, false);
             }
         }
 
+        // Renderizado
+        const time = Date.now() * 0.001;
         for(const id in avatars) {
             const {mesh, state} = avatars[id];
             let p = getPos(state);
             
             mesh.position.lerp(new THREE.Vector3(p.x, mesh.position.y, p.z), 0.3);
 
+            // Rotación
             const lp = mesh.userData.lp || p;
             const dx = p.x - lp.x; const dz = p.z - lp.z;
-            if(Math.hypot(dx,dz)>0.01) mesh.rotation.y = Math.atan2(dx,dz);
+            const moving = Math.hypot(dx,dz) > 0.01;
+            if(moving) mesh.rotation.y = Math.atan2(dx,dz);
             mesh.userData.lp = p;
 
+            // ANIMAR CAMINATA (Head Bob)
+            animateWalk(id, moving, time);
+
+            // Ragdoll
             let isRag = isOffline ? state._data.ragdoll : state.getState('ragdoll');
             if(isRag) {
                 mesh.rotation.x = -Math.PI/2; mesh.position.y = 0.5;
             } else {
-                mesh.rotation.x = 0; mesh.position.y = 0;
+                mesh.rotation.x = 0; // Se resetea en animateWalk
             }
 
-            let hp = isOffline ? state._data.hp : state.getState('hp');
-            if(hp===undefined || hp===null) hp=100;
-
-            const fg = mesh.getObjectByName("BarFG");
-            const bg = mesh.getObjectByName("BarBG");
-            if(fg && bg) {
-                fg.lookAt(camera.position); bg.lookAt(camera.position);
-                fg.scale.x = Math.max(0, hp/100);
-                fg.visible = hp>0;
+            // Vida en Enemigos
+            if(id !== (me ? me.id : '')) {
+                let hp = isOffline ? state._data.hp : state.getState('hp');
+                if(hp===undefined) hp=100;
+                const fg = mesh.getObjectByName("BarFG");
+                if(fg) {
+                    fg.scale.x = Math.max(0, hp/100);
+                    fg.visible = hp>0;
+                    fg.parent.lookAt(camera.position);
+                }
+            } else {
+                // Ocultar barra flotante propia (usamos HUD)
+                const bg = mesh.getObjectByName("BarBG");
+                if(bg) bg.parent.visible = false;
             }
         }
 
         if(me) {
             const p = getPos(me);
-            camera.position.lerp(new THREE.Vector3(p.x, 12, p.z+18), 0.1);
+            camera.position.lerp(new THREE.Vector3(p.x, 10, p.z+15), 0.1);
             camera.lookAt(p.x, 1, p.z);
+        }
+
+        // Estrellas Girando
+        if(domainGroup) {
+            domainGroup.rotation.y += 0.001;
         }
 
         renderer.render(scene, camera);
